@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="description" content="Liar's Bar - A multiplayer bluffing card game with Russian Roulette stakes. Play online with friends!">
+  <title>Liar's Bar</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+  <!-- TOAST CONTAINER -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- REVEAL OVERLAY -->
+  <div class="reveal-overlay hidden" id="reveal-overlay">
+    <div class="reveal-title" id="reveal-title"></div>
+    <div class="reveal-cards" id="reveal-cards"></div>
+    <div class="reveal-result" id="reveal-result"></div>
+  </div>
+
+  <!-- REVOLVER OVERLAY -->
+  <div class="revolver-overlay hidden" id="revolver-overlay">
+    <div class="revolver-emoji">🔫</div>
+    <div class="revolver-player" id="revolver-player"></div>
+    <div class="revolver-result" id="revolver-result"></div>
+  </div>
+
+  <!-- ===== LOBBY SCREEN ===== -->
+  <div class="screen active" id="lobby-screen">
+    <div class="lobby-container">
+      <h1 class="lobby-title">Liar's Bar</h1>
+      <p class="lobby-subtitle">Bluff. Challenge. Survive.</p>
+
+      <!-- Join/Create Panel (before room is created/joined) -->
+      <div id="lobby-join-panel">
+        <div class="lobby-card glass">
+          <h2>Enter Your Name</h2>
+          <div class="input-group">
+            <input type="text" id="player-name-input" placeholder="Your name..." maxlength="20" autocomplete="off">
+          </div>
+        </div>
+
+        <div class="lobby-card glass">
+          <h2>Create a Room</h2>
+          <button class="btn btn-gold btn-block" id="btn-create-room">Create Room</button>
+        </div>
+
+        <div class="lobby-card glass">
+          <h2>Join a Room</h2>
+          <div class="input-group">
+            <div class="input-row">
+              <input type="text" id="room-code-input" placeholder="Room code..." maxlength="6" autocomplete="off" style="text-transform:uppercase">
+              <button class="btn btn-emerald" id="btn-join-room">Join</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Room Lobby (after joining) -->
+      <div id="lobby-room-panel" style="display:none">
+        <div class="room-code-display glass">
+          <div class="room-code-label">Room Code</div>
+          <div class="room-code-value" id="display-room-code" title="Click to copy"></div>
+          <div class="room-code-hint">Click to copy • Share with friends</div>
+        </div>
+
+        <div class="lobby-card glass">
+          <h2>Players</h2>
+          <ul class="player-list" id="player-list"></ul>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:12px">
+          <button class="btn btn-outline btn-block" id="btn-ready">Ready</button>
+          <button class="btn btn-gold btn-block" id="btn-start-game" style="display:none">Start Game</button>
+        </div>
+        <button class="btn btn-outline btn-sm btn-block" id="btn-leave-room" style="margin-top:8px">Leave Room</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== GAME SCREEN ===== -->
+  <div class="screen" id="game-screen">
+    <div class="game-layout">
+      <!-- Top bar -->
+      <div class="game-top-bar glass">
+        <div class="room-info">Room: <span id="game-room-code"></span></div>
+        <div class="round-info">Round <span id="game-round">1</span></div>
+      </div>
+
+      <!-- Opponents -->
+      <div class="opponents-row" id="opponents-row"></div>
+
+      <!-- Center -->
+      <div class="game-center">
+        <div class="turn-timer" id="turn-timer" style="display:none">
+          <svg width="56" height="56">
+            <circle cx="28" cy="28" r="24" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="4"/>
+            <circle cx="28" cy="28" r="24" class="turn-timer-circle" id="timer-circle"
+              stroke-dasharray="150.8" stroke-dashoffset="0"/>
+          </svg>
+          <div class="turn-timer-text" id="timer-text">20</div>
+        </div>
+
+        <div class="status-message" id="status-message">Waiting...</div>
+
+        <div class="current-rank-badge glass" id="current-rank-badge" style="display:none">
+          Declare: <span id="current-rank-text"></span>
+        </div>
+
+        <div class="pile-area" id="pile-area">
+          <div class="pile-stack" id="pile-stack"></div>
+          <div class="pile-label"><span id="pile-count">0</span> cards in pile</div>
+        </div>
+
+        <div class="last-play-info" id="last-play-info"></div>
+      </div>
+
+      <!-- Controls -->
+      <div class="controls-area" id="controls-area">
+        <!-- Declaration panel -->
+        <div class="declaration-panel glass hidden" id="declaration-panel">
+          <div class="rank-buttons" id="rank-buttons"></div>
+        </div>
+
+        <div class="action-buttons" id="action-buttons">
+          <button class="btn btn-emerald" id="btn-play-cards" disabled>Play Cards</button>
+          <button class="btn-liar" id="btn-call-liar" disabled>🃏 LIAR!</button>
+        </div>
+
+        <div class="emoji-bar">
+          <button class="emoji-btn" data-emoji="😂">😂</button>
+          <button class="emoji-btn" data-emoji="😱">😱</button>
+          <button class="emoji-btn" data-emoji="🤥">🤥</button>
+          <button class="emoji-btn" data-emoji="👀">👀</button>
+          <button class="emoji-btn" data-emoji="🔥">🔥</button>
+        </div>
+      </div>
+
+      <!-- Hand -->
+      <div class="hand-area">
+        <div class="hand-container" id="hand-container"></div>
+      </div>
+    </div>
+
+    <!-- Game Log -->
+    <div class="game-log-panel glass" id="game-log-panel">
+      <h3>Game Log</h3>
+      <div id="game-log"></div>
+    </div>
+  </div>
+
+  <!-- ===== RESULTS SCREEN ===== -->
+  <div class="screen" id="results-screen">
+    <div class="results-container">
+      <h1 class="results-title">Game Over</h1>
+      <ul class="rankings-list" id="rankings-list"></ul>
+      <div class="results-actions">
+        <button class="btn btn-gold" id="btn-play-again">Play Again</button>
+        <button class="btn btn-outline" id="btn-back-lobby">Leave</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
