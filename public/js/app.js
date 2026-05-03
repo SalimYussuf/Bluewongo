@@ -21,6 +21,7 @@
     turnTimeLeft: 0,
     players: [],
     gameActive: false,
+    soundEnabled: true,
   };
 
   // ===== DOM REFS =====
@@ -46,7 +47,7 @@
 
   // Game
   const handContainer = $('hand-container');
-  const opponentsRow = $('opponents-row');
+  const playerLives = $('player-lives');
   const pileStack = $('pile-stack');
   const pileCount = $('pile-count');
   const statusMessage = $('status-message');
@@ -63,6 +64,7 @@
   const gameRound = $('game-round');
   const gameRoomCode = $('game-room-code');
   const gameLog = $('game-log');
+  const btnMute = $('btn-mute');
 
   // Overlays
   const revealOverlay = $('reveal-overlay');
@@ -72,6 +74,10 @@
   const revolverOverlay = $('revolver-overlay');
   const revolverPlayer = $('revolver-player');
   const revolverResult = $('revolver-result');
+  const disconnectOverlay = $('disconnect-overlay');
+  const disconnectMessage = $('disconnect-message');
+  const disconnectTimer = $('disconnect-timer');
+  const btnReconnect = $('btn-reconnect');
 
   // Results
   const rankingsList = $('rankings-list');
@@ -102,6 +108,44 @@
     $('toast-container').appendChild(toast);
     setTimeout(() => toast.remove(), 3000);
   }
+
+  // ===== AUDIO ENGINE =====
+  const sounds = {
+    card_placed: new Audio('sounds/card_placed.mp3'),
+    liar_called: new Audio('sounds/liar_called.mp3'),
+    liar_caught: new Audio('sounds/liar_caught.mp3'),
+    truth_told: new Audio('sounds/truth_told.mp3'),
+    your_turn: new Audio('sounds/your_turn.mp3'),
+    roulette_spin: new Audio('sounds/roulette_spin.mp3'),
+    roulette_fire: new Audio('sounds/roulette_fire.mp3'),
+    game_win: new Audio('sounds/game_win.mp3'),
+    player_joined: new Audio('sounds/player_joined.mp3'),
+    player_eliminated: new Audio('sounds/player_eliminated.mp3')
+  };
+
+  // Preload and adjust volumes if needed
+  Object.values(sounds).forEach(audio => {
+    audio.preload = 'auto';
+    audio.volume = 0.7; // default volume
+  });
+
+  function playSound(type) {
+    if (!state.soundEnabled) return;
+    const sound = sounds[type];
+    if (sound) {
+      sound.currentTime = 0; // reset to start
+      sound.play().catch(err => {
+        // Ignore playback errors (e.g. user hasn't interacted with page yet, or file missing)
+        console.warn(`Could not play sound: ${type}`, err);
+      });
+    }
+  }
+
+  btnMute.addEventListener('click', () => {
+    state.soundEnabled = !state.soundEnabled;
+    btnMute.textContent = state.soundEnabled ? '🔊' : '🔇';
+    btnMute.classList.toggle('muted', !state.soundEnabled);
+  });
 
   // ===== LOBBY =====
   btnCreate.addEventListener('click', () => {
@@ -252,16 +296,27 @@
     updateControls();
   }
 
-  // ===== GAME — OPPONENTS =====
-  function renderOpponents(players) {
-    opponentsRow.innerHTML = '';
-    players.forEach((p, i) => {
-      if (p.id === state.playerId) return;
+  // ===== GAME — OPPONENTS & PLAYER LIVES =====
+  function renderOpponents(players, currentTurnId = null) {
+    const seats = [$('seat-left'), $('seat-top'), $('seat-right')];
+    seats.forEach(s => s.innerHTML = '');
+
+    const opponents = players.filter(p => p.id !== state.playerId);
+    
+    let assignedSeats = [];
+    if (opponents.length === 1) assignedSeats = [seats[1]]; // top
+    else if (opponents.length === 2) assignedSeats = [seats[0], seats[2]]; // left, right
+    else if (opponents.length >= 3) assignedSeats = [seats[0], seats[1], seats[2]]; // left, top, right
+
+    opponents.forEach((p, i) => {
+      const seat = assignedSeats[i];
+      if (!seat) return;
 
       const card = document.createElement('div');
-      card.className = 'opponent-card glass';
+      card.className = 'opponent-card';
       if (p.isEliminated) card.classList.add('eliminated');
       if (!p.isConnected) card.classList.add('disconnected');
+      if (p.id === currentTurnId) card.classList.add('active-turn');
       card.id = `opponent-${p.id}`;
 
       // Mini card backs
@@ -271,24 +326,21 @@
         cardsHtml += '<div class="mini-card-back"></div>';
       }
 
-      // Revolver chambers
-      let chambersHtml = '';
-      for (let c = 0; c < 6; c++) {
-        let cls = 'life-chamber';
-        if (c < p.currentChamber) cls += ' passed';
-        if (c === p.currentChamber) cls += ' current';
-        chambersHtml += `<div class="${cls}"></div>`;
-      }
-
       card.innerHTML = `
         <div class="opponent-name">${p.name}${!p.isConnected ? ' ⚡' : ''}${p.isEliminated ? ' 💀' : ''}</div>
         <div class="opponent-cards-row">${cardsHtml}</div>
         <div style="font-size:.75rem;color:var(--text-dim);margin:4px 0">${p.handSize} cards</div>
-        <div class="opponent-lives">${chambersHtml}</div>
+        <div class="opponent-shots" style="font-size: .8rem; font-weight: bold; color: var(--gold);">Shots: ${p.currentChamber} / 6</div>
       `;
 
-      opponentsRow.appendChild(card);
+      seat.appendChild(card);
     });
+  }
+
+  function renderPlayerLives(playerInfo) {
+    const shotsText = $('player-shots-text');
+    if (!playerInfo) return;
+    shotsText.textContent = `${playerInfo.currentChamber} / 6`;
   }
 
   function highlightActivePlayer(playerId) {
@@ -528,7 +580,9 @@
     gameRound.textContent = data.roundNumber;
 
     renderHand();
-    renderOpponents(data.players);
+    renderOpponents(data.players, data.firstPlayerId);
+    const me = data.players.find(p => p.id === state.playerId);
+    renderPlayerLives(me);
     updatePile(0);
     lastPlayInfo.textContent = '';
 
@@ -582,7 +636,9 @@
 
   socket.on('players_update', (data) => {
     state.players = data.players;
-    renderOpponents(data.players);
+    renderOpponents(data.players, data.currentTurnId);
+    const me = data.players.find(p => p.id === state.playerId);
+    renderPlayerLives(me);
   });
 
   // -- Challenge --
@@ -634,16 +690,25 @@
   socket.on('revolver_result', (data) => {
     revealOverlay.classList.add('hidden');
     revolverOverlay.classList.remove('hidden');
+    
+    const revolverEmoji = document.querySelector('.revolver-emoji');
+    revolverEmoji.textContent = '🔫';
+    revolverEmoji.className = 'revolver-emoji spinning';
+    
     revolverPlayer.textContent = `${data.playerName} pulls the trigger...`;
     revolverResult.textContent = '';
 
     setTimeout(() => {
       if (data.fired) {
+        revolverEmoji.textContent = '💀';
+        revolverEmoji.className = 'revolver-emoji eliminated';
         revolverResult.className = 'revolver-result eliminated';
-        revolverResult.textContent = '💀 BANG! Eliminated!';
+        revolverResult.textContent = 'BANG! Eliminated!';
       } else {
+        revolverEmoji.textContent = '😮‍💨';
+        revolverEmoji.className = 'revolver-emoji safe';
         revolverResult.className = 'revolver-result survived';
-        revolverResult.textContent = '😮‍💨 Click... Survived!';
+        revolverResult.textContent = 'Click... Survived!';
       }
     }, 1500);
 
@@ -685,8 +750,50 @@
     showToast(`${data.playerName} disconnected!`, 'warning');
   });
 
+  socket.on('player_reconnect_failed', (data) => {
+    showToast(`${data.playerName} failed to reconnect.`, 'error');
+  });
+
   socket.on('player_reconnected', (data) => {
     showToast(`${data.playerName} reconnected!`, 'success');
+  });
+
+  socket.on('sound_event', (data) => {
+    playSound(data.type);
+  });
+
+  // Local disconnect
+  let disconnectInterval = null;
+  socket.on('disconnect', () => {
+    if (state.gameActive) {
+      disconnectOverlay.classList.remove('hidden');
+      btnReconnect.style.display = 'inline-flex';
+      let timeLeft = 60; // Should match RECONNECT_TIMEOUT_MS
+      disconnectTimer.textContent = timeLeft + 's';
+      
+      if (disconnectInterval) clearInterval(disconnectInterval);
+      disconnectInterval = setInterval(() => {
+        timeLeft--;
+        if (timeLeft <= 0) {
+          clearInterval(disconnectInterval);
+          disconnectMessage.textContent = 'Reconnection time expired. You were eliminated.';
+          btnReconnect.style.display = 'none';
+        } else {
+          disconnectTimer.textContent = timeLeft + 's';
+        }
+      }, 1000);
+    }
+  });
+
+  btnReconnect.addEventListener('click', () => {
+    socket.connect();
+    // Reconnection attempt will be sent on the 'connect' event
+  });
+
+  socket.on('connect', () => {
+    if (state.gameActive && !disconnectOverlay.classList.contains('hidden')) {
+      socket.emit('reconnect_attempt', { roomCode: state.roomCode, playerName: state.playerName });
+    }
   });
 
   socket.on('emoji_received', (data) => {
@@ -717,7 +824,14 @@
     showScreen('game');
     gameRoomCode.textContent = state.roomCode;
     renderHand();
-    renderOpponents(data.players);
+    renderOpponents(data.players, data.gameState.currentPlayerId);
+    const me = data.players.find(p => p.id === state.playerId);
+    renderPlayerLives(me);
+    
+    // Hide disconnect overlay
+    disconnectOverlay.classList.add('hidden');
+    if (disconnectInterval) clearInterval(disconnectInterval);
+
     showToast('Reconnected!', 'success');
   });
 

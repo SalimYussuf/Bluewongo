@@ -197,40 +197,37 @@ input[type="text"]::placeholder { color: var(--text-muted); }
 .game-top-bar .room-info span { color: var(--gold); font-weight: 700; }
 .game-top-bar .round-info { color: var(--text-dim); }
 
-/* Opponents */
-.opponents-row {
-  display: flex; gap: 10px; justify-content: center;
+/* Opponents Dashboard */
+.opponents-dashboard {
+  display: flex; gap: 16px; justify-content: center;
   flex-wrap: wrap;
   padding: 0 8px;
 }
+.opponent-slot {
+  display: flex; justify-content: center;
+}
 .opponent-card {
-  flex: 1; min-width: 120px; max-width: 200px;
-  padding: 12px;
+  width: 140px;
+  padding: 16px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 20px rgba(0,0,0,.2);
   text-align: center;
   position: relative;
   transition: var(--transition);
 }
-.opponent-card.active-turn { border-color: var(--emerald); box-shadow: 0 0 20px var(--emerald-glow); }
-.opponent-card.eliminated { opacity: .4; }
+.opponent-card.active-turn { border-color: var(--emerald); box-shadow: 0 0 20px var(--emerald-glow); transform: translateY(-4px); }
+.opponent-card.eliminated { opacity: .4; filter: grayscale(100%); }
 .opponent-card.disconnected { opacity: .5; }
-.opponent-name { font-weight: 600; font-size: .85rem; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.opponent-cards-row { display: flex; justify-content: center; gap: 3px; margin: 8px 0; }
+.opponent-name { font-weight: 700; font-size: .9rem; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.opponent-cards-row { display: flex; justify-content: center; gap: 3px; margin: 10px 0; }
 .mini-card-back {
-  width: 18px; height: 26px;
+  width: 20px; height: 28px;
   background: linear-gradient(135deg, var(--crimson), #991b1b);
-  border-radius: 3px;
-  border: 1px solid rgba(255,255,255,.15);
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,.2);
 }
-.opponent-lives { display: flex; gap: 4px; justify-content: center; }
-.life-chamber {
-  width: 14px; height: 14px; border-radius: 50%;
-  border: 2px solid var(--text-muted);
-  transition: var(--transition);
-  position: relative;
-}
-.life-chamber.passed { border-color: var(--emerald); background: rgba(16,185,129,.3); }
-.life-chamber.bullet { border-color: var(--crimson); background: var(--crimson); }
-.life-chamber.current { box-shadow: 0 0 8px var(--gold); border-color: var(--gold); }
 
 /* Center area */
 .game-center {
@@ -491,13 +488,18 @@ input[type="text"]::placeholder { color: var(--text-muted); }
   gap: 16px;
 }
 .revolver-overlay.hidden { display: none; }
-.revolver-emoji { font-size: 5rem; animation: revolverSpin 1s ease; }
+.revolver-emoji { font-size: 5rem; display: inline-block; }
+.revolver-emoji.spinning { animation: revolverSpin 1s ease; }
+.revolver-emoji.safe { animation: safeBounce 1s ease; }
+.revolver-emoji.eliminated { animation: skullShake 0.5s ease; color: var(--crimson); text-shadow: 0 0 30px var(--crimson); }
 .revolver-player { font-size: 1.2rem; color: var(--text-dim); }
 .revolver-result { font-size: 2rem; font-weight: 900; font-family: 'Playfair Display', serif; }
 .revolver-result.survived { color: var(--emerald); }
 .revolver-result.eliminated { color: var(--crimson); }
 
 @keyframes revolverSpin { 0% { transform: rotate(0deg); } 50% { transform: rotate(720deg); } 100% { transform: rotate(720deg); } }
+@keyframes safeBounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-20px); } }
+@keyframes skullShake { 0%, 100% { transform: translateX(0) scale(1); } 25% { transform: translateX(-15px) scale(1.1); } 50% { transform: translateX(15px) scale(1.1); } 75% { transform: translateX(-15px) scale(1.1); } }
 
 /* ===== RESULTS SCREEN ===== */
 #results-screen { justify-content: center; padding: 24px; }
@@ -544,9 +546,52 @@ input[type="text"]::placeholder { color: var(--text-muted); }
   .game-log-panel { display: none; }
   .card { width: 58px; height: 82px; }
   .card-rank { font-size: 1.1rem; }
-  .opponent-card { min-width: 90px; padding: 8px; }
+  .opponent-card { width: 110px; padding: 10px; }
   .mini-card-back { width: 14px; height: 20px; }
   .rank-btn { padding: 8px 12px; font-size: .75rem; }
   .btn-liar { padding: 12px 24px; font-size: .95rem; }
   .reveal-card { width: 70px; height: 98px; font-size: 1.3rem; }
 }
+
+/* ===== NEW OVERLAYS & DASHBOARD COMPONENTS ===== */
+.disconnect-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.95);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  z-index: 120;
+  animation: fadeIn .3s ease;
+  gap: 16px;
+  text-align: center;
+  padding: 20px;
+}
+.disconnect-overlay.hidden { display: none; }
+.disconnect-icon { font-size: 4rem; animation: pulse-liar 2s infinite; }
+.disconnect-title { font-size: 2.5rem; font-weight: 900; color: var(--crimson); }
+.disconnect-message { font-size: 1.2rem; color: var(--text-dim); }
+.disconnect-timer { font-size: 3rem; font-weight: 900; font-family: monospace; color: var(--gold); }
+
+/* Player Dashboard */
+.player-dashboard {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 16px; padding: 20px;
+}
+.player-lives-panel {
+  padding: 10px 24px; border-radius: 30px;
+  display: flex; flex-direction: row; align-items: center; gap: 16px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  box-shadow: 0 4px 15px rgba(0,0,0,.2);
+}
+.lives-title { font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted); font-weight: 800; letter-spacing: 1px; }
+.player-shots-text { font-size: 1.4rem; font-weight: 900; color: var(--gold); }
+
+/* Top controls */
+.top-controls { display: flex; gap: 10px; }
+.btn-icon {
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); 
+  border-radius: 8px; font-size: 1.4rem; cursor: pointer;
+  color: var(--text); padding: 6px 12px; transition: var(--transition);
+}
+.btn-icon:hover { background: rgba(255,255,255,.15); transform: translateY(-2px); }
+.btn-icon.muted { opacity: 0.5; filter: grayscale(100%); }

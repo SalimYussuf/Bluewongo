@@ -7,6 +7,7 @@ const {
   MAX_CARDS_PER_PLAY,
   TURN_TIMEOUT_MS,
   REVOLVER_CHAMBERS,
+  RECONNECT_TIMEOUT_MS,
 } = require('./constants');
 
 class GameEngine {
@@ -25,6 +26,11 @@ class GameEngine {
 
     // Track who played what into the pile for full reveal on challenge
     this.pileHistory = []; // Array of { playerId, cards[] }
+
+    // Reconnection tracking
+    this.disconnectedTimers = new Map(); // playerId -> { timer, disconnectedAt }
+    this.pausedForDisconnect = false; // Whether the game is paused waiting for reconnection
+    this.pausedPlayerId = null; // Which disconnected player we're waiting for
   }
 
   // ========== GAME LIFECYCLE ==========
@@ -150,6 +156,14 @@ class GameEngine {
       return;
     }
 
+    // If current player is disconnected, pause and wait for reconnection
+    if (!currentPlayer.isConnected) {
+      // Don't start the turn; just notify others we're waiting
+      this.pausedForDisconnect = true;
+      this.pausedPlayerId = currentPlayerId;
+      return;
+    }
+
     // Check if all players have emptied their hands (draw round)
     const playersWithCards = this.turnOrder.filter(id => {
       const p = this.room.getPlayer(id);
@@ -188,6 +202,9 @@ class GameEngine {
       isFirstPlay: false,
       pileSize: this.pile.length,
     });
+
+    // Emit sound event for turn start
+    this.io.to(this.room.code).emit('sound_event', { type: 'your_turn', targetId: currentPlayerId });
 
     // Start turn timer
     this.clearTurnTimer();
@@ -263,7 +280,7 @@ class GameEngine {
       'play'
     );
 
-    // Notify all players
+    // Notify all players + emit sound event
     this.io.to(this.room.code).emit('cards_played', {
       playerId,
       playerName: player.name,
@@ -272,6 +289,7 @@ class GameEngine {
       declaredCount,
       pileSize: this.pile.length,
     });
+    this.io.to(this.room.code).emit('sound_event', { type: 'card_placed' });
 
     // Send updated hand to the player
     const socket = this.io.sockets.sockets.get(player.socketId);
@@ -316,13 +334,14 @@ class GameEngine {
       'challenge'
     );
 
-    // Emit liar called event (for animation)
+    // Emit liar called event (for animation) + sound
     this.io.to(this.room.code).emit('liar_called', {
       challengerId,
       challengerName: challenger.name,
       challengedId: this.lastPlay.playerId,
       challengedName: challenged.name,
     });
+    this.io.to(this.room.code).emit('sound_event', { type: 'liar_called' });
 
     // Reveal after a delay (for animation)
     setTimeout(() => {
@@ -343,7 +362,7 @@ class GameEngine {
       card => card.rank === declaredRank || card.rank === JOKER
     );
 
-    // Emit reveal
+    // Emit reveal + sound
     this.io.to(this.room.code).emit('cards_revealed', {
       cards: actualCards,
       declaredRank,
@@ -353,6 +372,12 @@ class GameEngine {
       challengedId,
       challengedName: challenged.name,
     });
+
+    if (wasLying) {
+      this.io.to(this.room.code).emit('sound_event', { type: 'liar_caught' });
+    } else {
+      this.io.to(this.room.code).emit('sound_event', { type: 'truth_told' });
+    }
 
     // Determine loser
     const loserId = wasLying ? challengedId : challengerId;
@@ -391,6 +416,9 @@ class GameEngine {
     this.state = GAME_STATE.REVOLVER;
     const loser = this.room.getPlayer(loserId);
 
+    // Emit roulette spin sound
+    this.io.to(this.room.code).emit('sound_event', { type: 'roulette_spin' });
+
     const fired = loser.pullTrigger();
 
     this.io.to(this.room.code).emit('revolver_result', {
@@ -400,12 +428,18 @@ class GameEngine {
       currentChamber: loser.currentChamber,
     });
 
+    // Emit fire sound
+    setTimeout(() => {
+      this.io.to(this.room.code).emit('sound_event', { type: 'roulette_fire' });
+    }, 1200);
+
     if (fired) {
       this.addLog(`💀 ${loser.name} was eliminated!`, 'elimination');
       this.io.to(this.room.code).emit('player_eliminated', {
         playerId: loserId,
         playerName: loser.name,
       });
+      this.io.to(this.room.code).emit('sound_event', { type: 'player_eliminated' });
     } else {
       this.addLog(`${loser.name} survived the shot!`, 'survive');
     }
@@ -441,6 +475,12 @@ class GameEngine {
     this.room.state = ROOM_STATE.FINISHED;
     this.clearTurnTimer();
 
+    // Clear any remaining disconnect timers
+    for (const [pid, data] of this.disconnectedTimers) {
+      clearTimeout(data.timer);
+    }
+    this.disconnectedTimers.clear();
+
     // Build rankings
     const allPlayers = [...this.room.players.values()];
     const rankings = [];
@@ -461,6 +501,7 @@ class GameEngine {
     this.addLog('Game Over!', 'system');
 
     this.io.to(this.room.code).emit('game_over', { rankings });
+    this.io.to(this.room.code).emit('sound_event', { type: 'game_win' });
   }
 
   // ========== TIMEOUT ==========
@@ -495,12 +536,44 @@ class GameEngine {
     if (!player) return;
 
     player.isConnected = false;
-    player.isEliminated = true;
     player.disconnectedAt = Date.now();
 
-    this.addLog(`${player.name} disconnected and was removed from the game.`, 'elimination');
+    this.addLog(`⚡ ${player.name} disconnected. Waiting for reconnection...`, 'system');
 
+    // Notify remaining players with countdown info
     this.io.to(this.room.code).emit('player_disconnected', {
+      playerId,
+      playerName: player.name,
+      reconnectTimeout: RECONNECT_TIMEOUT_MS,
+      disconnectedAt: player.disconnectedAt,
+    });
+
+    // If it was the disconnected player's turn, pause the timer
+    const currentPlayerId = this.turnOrder[this.currentTurnIndex];
+    if (currentPlayerId === playerId && this.state === GAME_STATE.PLAYING) {
+      this.clearTurnTimer();
+      this.pausedForDisconnect = true;
+      this.pausedPlayerId = playerId;
+    }
+
+    this.broadcastPlayerInfo();
+  }
+
+  /**
+   * Called when the reconnection timer expires.
+   * NOW we eliminate the player and clean up.
+   */
+  handleReconnectTimeout(playerId) {
+    const player = this.room.getPlayer(playerId);
+    if (!player) return;
+
+    // Now actually eliminate the disconnected player
+    player.isEliminated = true;
+    player.isConnected = false;
+
+    this.addLog(`${player.name} failed to reconnect — eliminated!`, 'elimination');
+
+    this.io.to(this.room.code).emit('player_reconnect_failed', {
       playerId,
       playerName: player.name,
     });
@@ -509,12 +582,12 @@ class GameEngine {
       playerId,
       playerName: player.name,
     });
+    this.io.to(this.room.code).emit('sound_event', { type: 'player_eliminated' });
 
-    // Remove from turn order immediately
+    // Remove from turn order
     const wasCurrentTurn = this.turnOrder[this.currentTurnIndex] === playerId;
     this.turnOrder = this.turnOrder.filter(id => id !== playerId);
 
-    // Adjust currentTurnIndex if needed
     if (this.turnOrder.length === 0) {
       this.endGame();
       return;
@@ -533,15 +606,21 @@ class GameEngine {
 
     this.broadcastPlayerInfo();
 
-    // If it was the disconnected player's turn, immediately advance
-    if (wasCurrentTurn && this.state === GAME_STATE.PLAYING) {
+    // If the game was paused for this player, resume
+    if (this.pausedForDisconnect && this.pausedPlayerId === playerId) {
+      this.pausedForDisconnect = false;
+      this.pausedPlayerId = null;
+      if (this.state === GAME_STATE.PLAYING) {
+        this.startTurn();
+      }
+    } else if (wasCurrentTurn && this.state === GAME_STATE.PLAYING) {
       this.clearTurnTimer();
       this.startTurn();
     }
   }
 
-  handleReconnect(playerId, newSocketId) {
-    const player = this.room.getPlayer(playerId);
+  handleReconnect(oldPlayerId, newSocketId) {
+    const player = this.room.getPlayer(oldPlayerId);
     if (!player) return false;
 
     player.socketId = newSocketId;
@@ -549,22 +628,42 @@ class GameEngine {
     player.disconnectedAt = null;
 
     // Re-register in the room map with new socket ID if needed
-    if (playerId !== newSocketId) {
-      this.room.players.delete(playerId);
+    if (oldPlayerId !== newSocketId) {
+      this.room.players.delete(oldPlayerId);
       player.id = newSocketId;
       this.room.players.set(newSocketId, player);
 
       // Update turn order
-      const idx = this.turnOrder.indexOf(playerId);
+      const idx = this.turnOrder.indexOf(oldPlayerId);
       if (idx !== -1) {
         this.turnOrder[idx] = newSocketId;
       }
+
+      // Update host if needed
+      if (this.room.hostId === oldPlayerId) {
+        this.room.hostId = newSocketId;
+      }
     }
+
+    this.addLog(`${player.name} reconnected!`, 'system');
 
     this.io.to(this.room.code).emit('player_reconnected', {
       playerId: newSocketId,
       playerName: player.name,
     });
+    this.io.to(this.room.code).emit('sound_event', { type: 'player_joined' });
+
+    this.broadcastPlayerInfo();
+
+    // If game was paused waiting for this player, resume their turn
+    if (this.pausedForDisconnect && (this.pausedPlayerId === oldPlayerId || this.pausedPlayerId === newSocketId)) {
+      this.pausedForDisconnect = false;
+      this.pausedPlayerId = null;
+      if (this.state === GAME_STATE.PLAYING) {
+        // Give them a fresh turn timer
+        this.startTurn();
+      }
+    }
 
     return true;
   }
@@ -606,6 +705,7 @@ class GameEngine {
       if (socket) {
         socket.emit('players_update', {
           players: this.getPlayersInfo(pid),
+          currentTurnId: this.turnOrder[this.currentTurnIndex] || null,
         });
       }
     }
@@ -632,6 +732,11 @@ class GameEngine {
       roundNumber: this.roundNumber,
       currentPlayerId: this.turnOrder[this.currentTurnIndex],
       turnOrder: this.turnOrder,
+      lastPlay: this.lastPlay ? {
+        playerId: this.lastPlay.playerId,
+        declaredRank: this.lastPlay.declaredRank,
+        declaredCount: this.lastPlay.declaredCount,
+      } : null,
     };
   }
 }

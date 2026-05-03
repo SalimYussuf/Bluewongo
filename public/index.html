@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <meta name="description" content="Uwongo's Bar - A multiplayer bluffing card game with Russian Roulette stakes. Play online with friends!">
-  <title>Uwongo's Bar</title>
+  <meta name="description" content="Liar's Bar - A multiplayer bluffing card game with Russian Roulette stakes. Play online with friends!">
+  <title>Liar's Bar</title>
   <link rel="stylesheet" href="css/styles.css">
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 </head>
@@ -26,10 +26,19 @@
     <div class="revolver-result" id="revolver-result"></div>
   </div>
 
+  <!-- DISCONNECT OVERLAY -->
+  <div class="disconnect-overlay hidden" id="disconnect-overlay">
+    <div class="disconnect-icon">🔌</div>
+    <div class="disconnect-title">Connection Lost</div>
+    <div class="disconnect-message" id="disconnect-message">Waiting to reconnect...</div>
+    <div class="disconnect-timer" id="disconnect-timer">60s</div>
+    <button class="btn btn-emerald" id="btn-reconnect" style="display:none;">Reconnect Now</button>
+  </div>
+
   <!-- ===== LOBBY SCREEN ===== -->
   <div class="screen active" id="lobby-screen">
     <div class="lobby-container">
-      <h1 class="lobby-title">Uwongo's Bar</h1>
+      <h1 class="lobby-title">Liar's Bar</h1>
       <p class="lobby-subtitle">Bluff. Challenge. Survive.</p>
 
       <!-- Join/Create Panel (before room is created/joined) -->
@@ -85,13 +94,20 @@
       <!-- Top bar -->
       <div class="game-top-bar glass">
         <div class="room-info">Room: <span id="game-room-code"></span></div>
+        <div class="top-controls">
+          <button class="btn-icon" id="btn-mute" title="Mute/Unmute Sounds">🔊</button>
+        </div>
         <div class="round-info">Round <span id="game-round">1</span></div>
       </div>
 
-      <!-- Opponents -->
-      <div class="opponents-row" id="opponents-row"></div>
-
-      <!-- Center -->
+      <!-- Opponents Dashboard -->
+      <div class="opponents-dashboard">
+        <div class="opponent-slot" id="seat-left"></div>
+        <div class="opponent-slot" id="seat-top"></div>
+        <div class="opponent-slot" id="seat-right"></div>
+      </div>
+      
+      <!-- Center of table -->
       <div class="game-center">
         <div class="turn-timer" id="turn-timer" style="display:none">
           <svg width="56" height="56">
@@ -138,8 +154,16 @@
       </div>
 
       <!-- Hand -->
-      <div class="hand-area">
-        <div class="hand-container" id="hand-container"></div>
+      <div class="player-dashboard">
+        <!-- Player's Own Bullets -->
+        <div class="player-lives-panel glass">
+          <div class="lives-title">Shots Taken</div>
+          <div class="player-shots-text" id="player-shots-text">0 / 6</div>
+        </div>
+        
+        <div class="hand-area">
+          <div class="hand-container" id="hand-container"></div>
+        </div>
       </div>
     </div>
 

@@ -20,6 +20,19 @@ class Player {
   }
 
   /**
+   * How many safe chambers remain before the bullet.
+   * E.g. if bullet is at 3 and current chamber is 1, there are 2 safe pulls left.
+   */
+  get bulletsRemaining() {
+    if (this.isEliminated) return 0;
+    if (this.currentChamber <= this.bulletPosition) {
+      return this.bulletPosition - this.currentChamber;
+    }
+    // Already passed the bullet (shouldn't happen since pulling it eliminates)
+    return REVOLVER_CHAMBERS - this.currentChamber + this.bulletPosition;
+  }
+
+  /**
    * Pull the trigger. Returns true if the bullet fires (player eliminated).
    */
   pullTrigger() {
@@ -54,6 +67,7 @@ class Player {
 
   /**
    * Return sanitized data safe to send to this player (includes their own cards).
+   * Includes chambersRemaining so the player can see how many safe pulls they have.
    */
   toSelf() {
     return {
@@ -66,7 +80,9 @@ class Player {
       isConnected: this.isConnected,
       isEliminated: this.isEliminated,
       currentChamber: this.currentChamber,
+      chambersRemaining: REVOLVER_CHAMBERS - this.currentChamber - 1, // safe pulls left (not counting bullet)
       bulletPosition: undefined, // Never reveal bullet position
+      disconnectedAt: this.disconnectedAt,
     };
   }
 
@@ -83,6 +99,7 @@ class Player {
       isConnected: this.isConnected,
       isEliminated: this.isEliminated,
       currentChamber: this.currentChamber,
+      disconnectedAt: this.disconnectedAt,
     };
   }
 

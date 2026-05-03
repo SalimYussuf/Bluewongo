@@ -68,6 +68,69 @@ io.on('connection', (socket) => {
     }
 
     const name = playerName.trim().substring(0, 20);
+
+    // Check if this player is currently disconnected
+    let foundDisconnected = null;
+    for (const [oldId, data] of disconnectedPlayers) {
+      if (data.roomCode === code && data.playerName === name) {
+        foundDisconnected = { oldId, data };
+        break;
+      }
+    }
+
+    if (foundDisconnected) {
+      const { oldId, data } = foundDisconnected;
+      clearTimeout(data.timeout);
+      disconnectedPlayers.delete(oldId);
+
+      const engine = games.get(code);
+      if (engine) {
+        const success = engine.handleReconnect(oldId, socket.id);
+        if (success) {
+          playerRooms.set(socket.id, code);
+          socket.join(code);
+
+          const player = room.getPlayer(socket.id);
+          socket.emit('reconnect_success', {
+            roomCode: code,
+            playerId: socket.id,
+            hand: player.hand,
+            players: engine.getPlayersInfo(socket.id),
+            gameState: engine.getState(),
+          });
+          return;
+        }
+      } else {
+         // Reconnecting to lobby
+         const player = room.getPlayer(oldId);
+         if (player) {
+           room.players.delete(oldId);
+           player.id = socket.id;
+           player.socketId = socket.id;
+           player.isConnected = true;
+           room.players.set(socket.id, player);
+           if (room.hostId === oldId) room.hostId = socket.id;
+           
+           playerRooms.set(socket.id, code);
+           socket.join(code);
+           
+           socket.emit('room_joined', {
+             roomCode: code,
+             players: room.getPlayerList(),
+             hostId: room.hostId,
+             playerId: socket.id,
+           });
+           
+           socket.to(code).emit('player_list_update', {
+             players: room.getPlayerList(),
+             hostId: room.hostId,
+           });
+           return;
+         }
+      }
+    }
+
+    // Normal join flow
     const player = new Player(socket.id, name);
     const result = room.addPlayer(player);
 
@@ -219,8 +282,8 @@ io.on('connection', (socket) => {
 
         // Set reconnection timeout
         const timeout = setTimeout(() => {
-          // Player didn't reconnect in time — remove them
-          handlePlayerLeave(socket, roomCode, true);
+          // Player didn't reconnect in time — eliminate them
+          engine.handleReconnectTimeout(socket.id);
           disconnectedPlayers.delete(socket.id);
         }, RECONNECT_TIMEOUT_MS);
 
