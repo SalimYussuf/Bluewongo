@@ -13,8 +13,7 @@ const TOTAL_CARDS = 20;
 const MAX_PLAYERS = 4;
 const MIN_PLAYERS = 2;
 const MAX_CARDS_PER_PLAY = 3;
-const STARTING_LIVES = 3; // Not used with Russian Roulette, kept for reference
-const TURN_TIMEOUT_MS = 20000; // 20 seconds
+const TURN_TIMEOUT_MS = 60000; // 60 seconds
 const RECONNECT_TIMEOUT_MS = 60000; // 60 seconds
 const ROOM_CODE_LENGTH = 6;
 
@@ -40,6 +39,11 @@ const ROOM_STATE = {
   FINISHED: 'finished',
 };
 
+// Game settings
+const DEFAULT_SETTINGS = {
+  isDevilCardMode: false,
+};
+
 module.exports = {
   RANKS,
   JOKER,
@@ -48,7 +52,6 @@ module.exports = {
   MAX_PLAYERS,
   MIN_PLAYERS,
   MAX_CARDS_PER_PLAY,
-  STARTING_LIVES,
   TURN_TIMEOUT_MS,
   RECONNECT_TIMEOUT_MS,
   ROOM_CODE_LENGTH,
@@ -56,4 +59,5 @@ module.exports = {
   BULLETS,
   GAME_STATE,
   ROOM_STATE,
+  DEFAULT_SETTINGS,
 };

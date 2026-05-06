@@ -12,44 +12,36 @@ class Player {
     this.isEliminated = false;
     this.disconnectedAt = null;
 
-    // Russian Roulette revolver
-    // bulletPosition is the chamber (0-indexed) where the bullet sits
-    // currentChamber advances after each pull
-    this.bulletPosition = Math.floor(Math.random() * REVOLVER_CHAMBERS);
-    this.currentChamber = 0;
+    // Progressive Russian Roulette
+    this.shotsTaken = 0; 
   }
 
-  /**
-   * How many safe chambers remain before the bullet.
-   * E.g. if bullet is at 3 and current chamber is 1, there are 2 safe pulls left.
-   */
-  get bulletsRemaining() {
-    if (this.isEliminated) return 0;
-    if (this.currentChamber <= this.bulletPosition) {
-      return this.bulletPosition - this.currentChamber;
-    }
-    // Already passed the bullet (shouldn't happen since pulling it eliminates)
-    return REVOLVER_CHAMBERS - this.currentChamber + this.bulletPosition;
-  }
 
   /**
-   * Pull the trigger. Returns true if the bullet fires (player eliminated).
+   * Pull the trigger. Returns true if the bullet fires (player is eliminated).
+   * Progressive chance: (shotsTaken + 1) / REVOLVER_CHAMBERS
    */
   pullTrigger() {
-    const fired = this.currentChamber === this.bulletPosition;
-    this.currentChamber = (this.currentChamber + 1) % REVOLVER_CHAMBERS;
+    const chance = (this.shotsTaken + 1) / REVOLVER_CHAMBERS;
+    const fired = Math.random() < chance;
+    
     if (fired) {
       this.isEliminated = true;
+    } else {
+      this.shotsTaken++;
     }
     return fired;
   }
 
   /**
-   * Reset revolver for a new game.
+   * Forcefully take a shot (Devil Card effect).
    */
+  forceLoseBullet() {
+    return this.pullTrigger();
+  }
+
   resetRevolver() {
-    this.bulletPosition = Math.floor(Math.random() * REVOLVER_CHAMBERS);
-    this.currentChamber = 0;
+    this.shotsTaken = 0;
     this.isEliminated = false;
   }
 
@@ -65,10 +57,6 @@ class Player {
     return this.hand.length > 0;
   }
 
-  /**
-   * Return sanitized data safe to send to this player (includes their own cards).
-   * Includes chambersRemaining so the player can see how many safe pulls they have.
-   */
   toSelf() {
     return {
       id: this.id,
@@ -79,9 +67,8 @@ class Player {
       isHost: this.isHost,
       isConnected: this.isConnected,
       isEliminated: this.isEliminated,
-      currentChamber: this.currentChamber,
-      chambersRemaining: REVOLVER_CHAMBERS - this.currentChamber - 1, // safe pulls left (not counting bullet)
-      bulletPosition: undefined, // Never reveal bullet position
+      shotsTaken: this.shotsTaken,
+      maxShots: REVOLVER_CHAMBERS,
       disconnectedAt: this.disconnectedAt,
     };
   }
@@ -98,7 +85,7 @@ class Player {
       isHost: this.isHost,
       isConnected: this.isConnected,
       isEliminated: this.isEliminated,
-      currentChamber: this.currentChamber,
+      shotsTaken: this.shotsTaken,
       disconnectedAt: this.disconnectedAt,
     };
   }

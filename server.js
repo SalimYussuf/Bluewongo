@@ -47,6 +47,7 @@ io.on('connection', (socket) => {
       players: room.getPlayerList(),
       hostId: room.hostId,
       playerId: socket.id,
+      settings: room.settings,
     });
 
     console.log(`Room ${code} created by ${name}`);
@@ -119,6 +120,7 @@ io.on('connection', (socket) => {
              players: room.getPlayerList(),
              hostId: room.hostId,
              playerId: socket.id,
+             settings: room.settings,
            });
            
            socket.to(code).emit('player_list_update', {
@@ -147,6 +149,7 @@ io.on('connection', (socket) => {
       players: room.getPlayerList(),
       hostId: room.hostId,
       playerId: socket.id,
+      settings: room.settings,
     });
 
     // Notify others
@@ -172,6 +175,20 @@ io.on('connection', (socket) => {
       players: room.getPlayerList(),
       hostId: room.hostId,
     });
+  });
+
+  // ---------- UPDATE SETTINGS ----------
+  socket.on('update_settings', ({ roomCode, settings }) => {
+    const room = rooms.get(roomCode);
+    if (!room) return;
+
+    if (socket.id !== room.hostId) {
+      socket.emit('error', { message: 'Only the host can change settings' });
+      return;
+    }
+
+    const updatedSettings = room.updateSettings(settings);
+    io.to(roomCode).emit('settings_updated', { settings: updatedSettings });
   });
 
   // ---------- START GAME ----------
@@ -395,4 +412,4 @@ setInterval(() => {
 }, 300000); // Every 5 minutes
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Liar's Bar server running on http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`Uwongo's Bar server running on http://localhost:${PORT}`));

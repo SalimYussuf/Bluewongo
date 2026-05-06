@@ -8,9 +8,17 @@ class Room {
     this.hostId = hostPlayer.id;
     this.state = ROOM_STATE.WAITING;
     this.createdAt = Date.now();
+    this.settings = {
+      isDevilCardMode: false,
+    };
 
     hostPlayer.isHost = true;
     this.players.set(hostPlayer.id, hostPlayer);
+  }
+
+  updateSettings(newSettings) {
+    this.settings = { ...this.settings, ...newSettings };
+    return this.settings;
   }
 
   addPlayer(player) {

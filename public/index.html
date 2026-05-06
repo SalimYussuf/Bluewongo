@@ -1,13 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <meta name="description" content="Liar's Bar - A multiplayer bluffing card game with Russian Roulette stakes. Play online with friends!">
-  <title>Liar's Bar</title>
+  <meta name="description"
+    content="Uwongo's Bar - A multiplayer bluffing card game with Russian Roulette stakes. Play online with friends!">
+  <title>Uwongo's Bar</title>
   <link rel="stylesheet" href="css/styles.css">
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 </head>
+
 <body>
   <!-- TOAST CONTAINER -->
   <div class="toast-container" id="toast-container"></div>
@@ -38,7 +41,7 @@
   <!-- ===== LOBBY SCREEN ===== -->
   <div class="screen active" id="lobby-screen">
     <div class="lobby-container">
-      <h1 class="lobby-title">Liar's Bar</h1>
+      <h1 class="lobby-title">Uwongo's Bar</h1>
       <p class="lobby-subtitle">Bluff. Challenge. Survive.</p>
 
       <!-- Join/Create Panel (before room is created/joined) -->
@@ -59,7 +62,8 @@
           <h2>Join a Room</h2>
           <div class="input-group">
             <div class="input-row">
-              <input type="text" id="room-code-input" placeholder="Room code..." maxlength="6" autocomplete="off" style="text-transform:uppercase">
+              <input type="text" id="room-code-input" placeholder="Room code..." maxlength="6" autocomplete="off"
+                style="text-transform:uppercase">
               <button class="btn btn-emerald" id="btn-join-room">Join</button>
             </div>
           </div>
@@ -77,6 +81,21 @@
         <div class="lobby-card glass">
           <h2>Players</h2>
           <ul class="player-list" id="player-list"></ul>
+        </div>
+
+        <!-- Room Settings (Host only) -->
+        <div class="lobby-card glass" id="room-settings-panel" style="display:none">
+          <h2>Game Mode</h2>
+          <div class="settings-group">
+            <label class="toggle-container">
+              <div class="toggle-info">
+                <span class="toggle-label">😈 Devil Card Mode</span>
+                <span class="toggle-desc">One hidden card triggers a lobby-wide punishment.</span>
+              </div>
+              <input type="checkbox" id="toggle-devil-mode">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
         </div>
 
         <div style="display:flex;gap:10px;margin-top:12px">
@@ -100,20 +119,25 @@
         <div class="round-info">Round <span id="game-round">1</span></div>
       </div>
 
+      <!-- Devil Mode Banner -->
+      <div class="devil-mode-banner hidden" id="devil-banner">
+        <span>😈 Devil Mode Active — Someone has the card...</span>
+      </div>
+
       <!-- Opponents Dashboard -->
       <div class="opponents-dashboard">
         <div class="opponent-slot" id="seat-left"></div>
         <div class="opponent-slot" id="seat-top"></div>
         <div class="opponent-slot" id="seat-right"></div>
       </div>
-      
+
       <!-- Center of table -->
       <div class="game-center">
         <div class="turn-timer" id="turn-timer" style="display:none">
           <svg width="56" height="56">
-            <circle cx="28" cy="28" r="24" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="4"/>
-            <circle cx="28" cy="28" r="24" class="turn-timer-circle" id="timer-circle"
-              stroke-dasharray="150.8" stroke-dashoffset="0"/>
+            <circle cx="28" cy="28" r="24" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="4" />
+            <circle cx="28" cy="28" r="24" class="turn-timer-circle" id="timer-circle" stroke-dasharray="150.8"
+              stroke-dashoffset="0" />
           </svg>
           <div class="turn-timer-text" id="timer-text">20</div>
         </div>
@@ -160,7 +184,7 @@
           <div class="lives-title">Shots Taken</div>
           <div class="player-shots-text" id="player-shots-text">0 / 6</div>
         </div>
-        
+
         <div class="hand-area">
           <div class="hand-container" id="hand-container"></div>
         </div>
@@ -188,4 +212,5 @@
 
   <script src="js/app.js"></script>
 </body>
+
 </html>

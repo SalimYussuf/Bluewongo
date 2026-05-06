@@ -1,4 +1,4 @@
-// ===== LIAR'S BAR — CLIENT APP =====
+// ===== UWONGO'S BAR — CLIENT APP =====
 (function () {
   'use strict';
 
@@ -22,6 +22,9 @@
     players: [],
     gameActive: false,
     soundEnabled: true,
+    settings: {
+      isDevilCardMode: false,
+    },
   };
 
   // ===== DOM REFS =====
@@ -44,6 +47,8 @@
   const btnReady = $('btn-ready');
   const btnStart = $('btn-start-game');
   const btnLeave = $('btn-leave-room');
+  const roomSettingsPanel = $('room-settings-panel');
+  const toggleDevilMode = $('toggle-devil-mode');
 
   // Game
   const handContainer = $('hand-container');
@@ -65,6 +70,7 @@
   const gameRoomCode = $('game-room-code');
   const gameLog = $('game-log');
   const btnMute = $('btn-mute');
+  const devilBanner = $('devil-banner');
 
   // Overlays
   const revealOverlay = $('reveal-overlay');
@@ -120,7 +126,8 @@
     roulette_fire: new Audio('sounds/roulette_fire.mp3'),
     game_win: new Audio('sounds/game_win.mp3'),
     player_joined: new Audio('sounds/player_joined.mp3'),
-    player_eliminated: new Audio('sounds/player_eliminated.mp3')
+    player_eliminated: new Audio('sounds/player_eliminated.mp3'),
+    devil_laugh: new Audio('sounds/devil_laugh.mp3')
   };
 
   // Preload and adjust volumes if needed
@@ -187,6 +194,14 @@
     });
   });
 
+  toggleDevilMode.addEventListener('change', () => {
+    if (!state.isHost) return;
+    socket.emit('update_settings', {
+      roomCode: state.roomCode,
+      settings: { isDevilCardMode: toggleDevilMode.checked }
+    });
+  });
+
   function showRoomLobby(roomCode, players, hostId) {
     state.roomCode = roomCode;
     state.isHost = (hostId === state.playerId);
@@ -194,6 +209,10 @@
     roomPanel.style.display = 'block';
     displayCode.textContent = roomCode;
     updatePlayerList(players, hostId);
+
+    // Show settings panel if host
+    roomSettingsPanel.style.display = 'block';
+    toggleDevilMode.disabled = !state.isHost;
   }
 
   function updatePlayerList(players, hostId) {
@@ -274,6 +293,15 @@
         <span class="card-corner bottom">${info.symbol}</span>
       `;
 
+      if (card.isDevil) {
+        el.classList.add('devil-card');
+        el.title = "DEVIL CARD — If challenged while telling the truth, all opponents shoot!";
+        const devilIcon = document.createElement('span');
+        devilIcon.className = 'devil-icon';
+        devilIcon.textContent = '😈';
+        el.appendChild(devilIcon);
+      }
+
       el.addEventListener('click', () => toggleCard(card.id));
       handContainer.appendChild(el);
     });
@@ -302,7 +330,7 @@
     seats.forEach(s => s.innerHTML = '');
 
     const opponents = players.filter(p => p.id !== state.playerId);
-    
+
     let assignedSeats = [];
     if (opponents.length === 1) assignedSeats = [seats[1]]; // top
     else if (opponents.length === 2) assignedSeats = [seats[0], seats[2]]; // left, right
@@ -330,7 +358,7 @@
         <div class="opponent-name">${p.name}${!p.isConnected ? ' ⚡' : ''}${p.isEliminated ? ' 💀' : ''}</div>
         <div class="opponent-cards-row">${cardsHtml}</div>
         <div style="font-size:.75rem;color:var(--text-dim);margin:4px 0">${p.handSize} cards</div>
-        <div class="opponent-shots" style="font-size: .8rem; font-weight: bold; color: var(--gold);">Shots: ${p.currentChamber} / 6</div>
+        <div class="opponent-shots" style="font-size: .8rem; font-weight: bold; color: var(--gold);">Shots: ${p.shotsTaken} / 6</div>
       `;
 
       seat.appendChild(card);
@@ -340,7 +368,9 @@
   function renderPlayerLives(playerInfo) {
     const shotsText = $('player-shots-text');
     if (!playerInfo) return;
-    shotsText.textContent = `${playerInfo.currentChamber} / 6`;
+    shotsText.textContent = `${playerInfo.shotsTaken} / ${playerInfo.maxShots || 6}`;
+    const livesTitle = $('player-lives-panel')?.querySelector('.lives-title');
+    if (livesTitle) livesTitle.textContent = "Shots Taken";
   }
 
   function highlightActivePlayer(playerId) {
@@ -541,6 +571,8 @@
   socket.on('room_created', (data) => {
     state.playerId = data.playerId;
     state.roomCode = data.roomCode;
+    state.settings = data.settings || state.settings;
+    if (toggleDevilMode) toggleDevilMode.checked = state.settings.isDevilCardMode;
     showRoomLobby(data.roomCode, data.players, data.hostId);
     showToast('Room created!', 'success');
   });
@@ -548,8 +580,16 @@
   socket.on('room_joined', (data) => {
     state.playerId = data.playerId;
     state.roomCode = data.roomCode;
+    state.settings = data.settings || state.settings;
+    if (toggleDevilMode) toggleDevilMode.checked = state.settings.isDevilCardMode;
     showRoomLobby(data.roomCode, data.players, data.hostId);
     showToast('Joined room!', 'success');
+  });
+
+  socket.on('settings_updated', (data) => {
+    state.settings = data.settings;
+    if (toggleDevilMode) toggleDevilMode.checked = state.settings.isDevilCardMode;
+    showToast(`Devil Mode: ${state.settings.isDevilCardMode ? 'ON' : 'OFF'}`, 'info');
   });
 
   socket.on('player_list_update', (data) => {
@@ -569,6 +609,12 @@
     gameLog.innerHTML = '';
     revealOverlay.classList.add('hidden');
     revolverOverlay.classList.add('hidden');
+
+    if (state.settings.isDevilCardMode) {
+      devilBanner.classList.remove('hidden');
+    } else {
+      devilBanner.classList.add('hidden');
+    }
   });
 
   socket.on('cards_dealt', (data) => {
@@ -664,8 +710,8 @@
       el.className = 'reveal-card';
       const info = rankSymbols[card.rank] || { symbol: '?', icon: '' };
       const color = card.rank === 'Ace' ? 'var(--accent-ace)' :
-                    card.rank === 'King' ? 'var(--accent-king)' :
-                    card.rank === 'Queen' ? 'var(--accent-queen)' : 'var(--accent-joker)';
+        card.rank === 'King' ? 'var(--accent-king)' :
+          card.rank === 'Queen' ? 'var(--accent-queen)' : 'var(--accent-joker)';
       el.style.borderColor = color;
       el.style.color = color;
       el.innerHTML = `<span>${info.icon}</span><span style="font-size:.8rem">${card.rank}</span>`;
@@ -686,24 +732,83 @@
     showToast(`${loserText} up the pile!`, 'info');
   });
 
+  socket.on('devil_card_triggered', (data) => {
+    // Show dramatic full-screen reveal
+    const overlay = document.createElement('div');
+    overlay.className = 'devil-reveal-screen';
+
+    const devilCard = data.cards.find(c => c.isDevil) || data.cards[0];
+    const info = rankSymbols[devilCard.rank] || { symbol: '?', icon: '😈' };
+
+    overlay.innerHTML = `
+      <div class="devil-reveal-title">DEVIL CARD!</div>
+      <div class="devil-reveal-card-container">
+        <div class="devil-reveal-card">
+          <span>${info.icon}</span>
+        </div>
+      </div>
+      <div class="devil-reveal-subtitle">
+        ${data.placerName} told the truth!<br>
+        <span style="color:var(--gold);font-weight:900">EVERYONE ELSE TAKES A SHOT!</span>
+      </div>
+      <div class="devil-shootout-row" id="devil-shootout-row"></div>
+    `;
+
+    document.body.appendChild(overlay);
+    playSound('devil_laugh');
+
+    // After a delay, show the shots
+    setTimeout(() => {
+      const row = $('devil-shootout-row');
+      data.victims.forEach(v => {
+        const victimEl = document.createElement('div');
+        victimEl.className = 'devil-victim';
+        victimEl.innerHTML = `
+          <div class="victim-name">${v.name}</div>
+          <div class="victim-gun">🔫</div>
+        `;
+        row.appendChild(victimEl);
+
+        // Animate shot
+        setTimeout(() => {
+          if (v.fired) {
+            victimEl.querySelector('.victim-gun').textContent = '💥';
+            victimEl.classList.add('hit');
+            playSound('roulette_fire');
+          } else {
+            victimEl.querySelector('.victim-gun').textContent = '😮‍💨';
+            playSound('roulette_spin'); // Or a click sound
+          }
+        }, 1000 + Math.random() * 500);
+      });
+    }, 2000);
+
+    setTimeout(() => {
+      overlay.style.opacity = '0';
+      overlay.style.transition = 'opacity 1s ease';
+      setTimeout(() => overlay.remove(), 1000);
+    }, 6000);
+  });
+
   // -- Revolver --
   socket.on('revolver_result', (data) => {
     revealOverlay.classList.add('hidden');
     revolverOverlay.classList.remove('hidden');
-    
+
     const revolverEmoji = document.querySelector('.revolver-emoji');
     revolverEmoji.textContent = '🔫';
     revolverEmoji.className = 'revolver-emoji spinning';
-    
+
     revolverPlayer.textContent = `${data.playerName} pulls the trigger...`;
     revolverResult.textContent = '';
 
     setTimeout(() => {
       if (data.fired) {
-        revolverEmoji.textContent = '💀';
-        revolverEmoji.className = 'revolver-emoji eliminated';
+        revolverEmoji.textContent = data.isEliminated ? '💀' : '💥';
+        revolverEmoji.className = 'revolver-emoji ' + (data.isEliminated ? 'eliminated' : 'fired');
         revolverResult.className = 'revolver-result eliminated';
-        revolverResult.textContent = 'BANG! Eliminated!';
+        revolverResult.textContent = data.isEliminated ? 'BANG! Eliminated!' : 'BANG! haha ded';
+        if (data.isEliminated) playSound('player_eliminated');
       } else {
         revolverEmoji.textContent = '😮‍💨';
         revolverEmoji.className = 'revolver-emoji safe';
@@ -770,7 +875,7 @@
       btnReconnect.style.display = 'inline-flex';
       let timeLeft = 60; // Should match RECONNECT_TIMEOUT_MS
       disconnectTimer.textContent = timeLeft + 's';
-      
+
       if (disconnectInterval) clearInterval(disconnectInterval);
       disconnectInterval = setInterval(() => {
         timeLeft--;
@@ -827,7 +932,7 @@
     renderOpponents(data.players, data.gameState.currentPlayerId);
     const me = data.players.find(p => p.id === state.playerId);
     renderPlayerLives(me);
-    
+
     // Hide disconnect overlay
     disconnectOverlay.classList.add('hidden');
     if (disconnectInterval) clearInterval(disconnectInterval);

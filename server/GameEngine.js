@@ -105,6 +105,27 @@ class GameEngine {
       player.hand = hands[index];
     });
 
+    // Handle Devil Card Mode
+    if (this.room.settings.isDevilCardMode) {
+      // Pick one random card of the current rank from all dealt hands to be the Devil Card
+      const rankCardsInHands = [];
+      this.turnOrder.forEach(pid => {
+        const p = this.room.getPlayer(pid);
+        p.hand.forEach(card => {
+          card.isDevil = false; // Reset first
+          if (card.rank === this.currentRank) {
+            rankCardsInHands.push(card);
+          }
+        });
+      });
+
+      if (rankCardsInHands.length > 0) {
+        const devilCard = rankCardsInHands[Math.floor(Math.random() * rankCardsInHands.length)];
+        devilCard.isDevil = true;
+        this.addLog('A Devil Card has been dealt into someone\'s hand...', 'system');
+      }
+    }
+
     this.addLog(`Round ${this.roundNumber} — Cards dealt! Declare: ${this.currentRank}s`, 'system');
 
     // Send each player their own hand + opponent info
@@ -345,10 +366,81 @@ class GameEngine {
 
     // Reveal after a delay (for animation)
     setTimeout(() => {
-      this.resolveChallenge(challengerId);
+      const { declaredRank, actualCards } = this.lastPlay;
+      const wasLying = !actualCards.every(
+        card => card.rank === declaredRank || card.rank === JOKER
+      );
+      const hasDevilCard = actualCards.some(card => card.isDevil);
+      
+      // Trigger Devil effect ONLY if truthful placement containing Devil Card
+      if (hasDevilCard && !wasLying) {
+        this.triggerDevilCard(challengerId);
+      } else {
+        this.resolveChallenge(challengerId);
+      }
     }, 2000);
 
     return { success: true };
+  }
+
+  triggerDevilCard(challengerId) {
+    const placerId = this.lastPlay.playerId;
+    const placer = this.room.getPlayer(placerId);
+    
+    this.addLog(`😈 DEVIL CARD REVEALED by ${placer.name}!`, 'devil');
+    
+    // Everyone except the placer loses 1 bullet
+    const victims = [];
+    for (const [pid, player] of this.room.players) {
+      if (pid !== placerId && !player.isEliminated) {
+        const fired = player.forceLoseBullet(); // This now uses pullTrigger() chance
+        
+        victims.push({
+          id: player.id,
+          name: player.name,
+          fired: fired,
+          shotsTaken: player.shotsTaken,
+          isEliminated: player.isEliminated
+        });
+        
+        // Emit shooting animation for each victim with ACTUAL fired state
+        this.io.to(this.room.code).emit('revolver_result', {
+            playerId: player.id,
+            playerName: player.name,
+            fired: fired,
+            isDevilTrigger: true,
+            isEliminated: player.isEliminated,
+            shotsTaken: player.shotsTaken
+        });
+
+        if (player.isEliminated) {
+          this.addLog(`💀 ${player.name} was eliminated by the Devil Card!`, 'elimination');
+        } else {
+          this.addLog(`😮‍💨 ${player.name} survived the Devil Card shot!`, 'survive');
+        }
+      }
+    }
+
+    // Emit dramatic reveal event
+    this.io.to(this.room.code).emit('devil_card_triggered', {
+      placerId,
+      placerName: placer.name,
+      cards: this.lastPlay.actualCards,
+      victims: victims // Pass the actual results
+    });
+    this.io.to(this.room.code).emit('sound_event', { type: 'devil_laugh' });
+
+    // Mark the card as no longer devil so it doesn't trigger again if picked up
+    this.lastPlay.actualCards.forEach(card => card.isDevil = false);
+
+    // After a delay for the dramatic effect, resolve the liar call normally
+    setTimeout(() => {
+      // Update everyone's info (bullets changed)
+      this.broadcastPlayerInfo();
+      
+      // Resolve the challenge as normal
+      this.resolveChallenge(challengerId);
+    }, 4000); // 4 seconds for dramatic effect
   }
 
   resolveChallenge(challengerId) {
@@ -434,12 +526,17 @@ class GameEngine {
     }, 1200);
 
     if (fired) {
-      this.addLog(`💀 ${loser.name} was eliminated!`, 'elimination');
+      this.addLog(`💥 BANG! ${loser.name} lost a bullet!`, 'elimination');
+      if (loser.isEliminated) {
+        this.addLog(`💀 ${loser.name} has been eliminated!`, 'elimination');
+      }
       this.io.to(this.room.code).emit('player_eliminated', {
         playerId: loserId,
         playerName: loser.name,
+        isEliminated: loser.isEliminated,
+        shotsTaken: loser.shotsTaken
       });
-      this.io.to(this.room.code).emit('sound_event', { type: 'player_eliminated' });
+      this.io.to(this.room.code).emit('sound_event', { type: 'roulette_fire' });
     } else {
       this.addLog(`${loser.name} survived the shot!`, 'survive');
     }
