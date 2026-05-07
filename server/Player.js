@@ -13,7 +13,8 @@ class Player {
     this.disconnectedAt = null;
 
     // Progressive Russian Roulette
-    this.shotsTaken = 0; 
+    this.shotsTaken = 0;
+    this.teamIndex = null;
   }
 
 
@@ -24,7 +25,7 @@ class Player {
   pullTrigger() {
     const chance = (this.shotsTaken + 1) / REVOLVER_CHAMBERS;
     const fired = Math.random() < chance;
-    
+
     if (fired) {
       this.isEliminated = true;
     } else {
@@ -70,6 +71,7 @@ class Player {
       shotsTaken: this.shotsTaken,
       maxShots: REVOLVER_CHAMBERS,
       disconnectedAt: this.disconnectedAt,
+      teamIndex: this.teamIndex,
     };
   }
 
@@ -87,6 +89,7 @@ class Player {
       isEliminated: this.isEliminated,
       shotsTaken: this.shotsTaken,
       disconnectedAt: this.disconnectedAt,
+      teamIndex: this.teamIndex,
     };
   }
 
@@ -100,6 +103,7 @@ class Player {
       isReady: this.isReady,
       isHost: this.isHost,
       isConnected: this.isConnected,
+      teamIndex: this.teamIndex,
     };
   }
 }

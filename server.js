@@ -239,6 +239,17 @@ io.on('connection', (socket) => {
     }
   });
 
+  // ---------- SELECT TARGET ----------
+  socket.on('select_target', ({ roomCode, targetId }) => {
+    const engine = games.get(roomCode);
+    if (!engine) return;
+
+    const result = engine.selectTarget(socket.id, targetId);
+    if (!result.success) {
+      socket.emit('error', { message: result.error });
+    }
+  });
+
   // ---------- LEAVE ROOM ----------
   socket.on('leave_room', ({ roomCode }) => {
     handlePlayerLeave(socket, roomCode);

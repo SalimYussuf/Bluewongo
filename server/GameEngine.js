@@ -4,6 +4,8 @@ const {
   ROOM_STATE,
   RANKS,
   JOKER,
+  CHAOS,
+  MASTER,
   MAX_CARDS_PER_PLAY,
   TURN_TIMEOUT_MS,
   REVOLVER_CHAMBERS,
@@ -31,6 +33,14 @@ class GameEngine {
     this.disconnectedTimers = new Map(); // playerId -> { timer, disconnectedAt }
     this.pausedForDisconnect = false; // Whether the game is paused waiting for reconnection
     this.pausedPlayerId = null; // Which disconnected player we're waiting for
+
+    // Chaos Mode tracking
+    this.shootersQueue = [];
+    this.currentShooterId = null;
+
+    // Devil Card tracking
+    this.devilVictimsQueue = [];
+    this.lastChallengerId = null;
   }
 
   // ========== GAME LIFECYCLE ==========
@@ -49,8 +59,15 @@ class GameEngine {
       player.hand = [];
     }
 
-    // Set up turn order
-    this.turnOrder = [...this.room.players.keys()];
+    // Set up turn order (based on team indices 0-3)
+    const teamIndices = new Set();
+    this.room.players.forEach(p => {
+      if (typeof p.teamIndex === 'number' && p.teamIndex >= 0 && p.teamIndex < 4) {
+        teamIndices.add(p.teamIndex);
+      }
+    });
+
+    this.turnOrder = Array.from(teamIndices);
     this.shuffleArray(this.turnOrder);
     this.currentTurnIndex = 0;
 
@@ -61,10 +78,8 @@ class GameEngine {
 
     // Emit game started
     this.io.to(this.room.code).emit('game_started', {
-      turnOrder: this.turnOrder.map(id => {
-        const p = this.room.getPlayer(id);
-        return { id: p.id, name: p.name };
-      }),
+      turnOrder: this.turnOrder, // Array of team indices [0, 2, 1, 3]
+      players: [...this.room.players.values()].map(p => p.toOther())
     });
 
     // Start first round
@@ -79,11 +94,13 @@ class GameEngine {
     this.pile = [];
     this.pileHistory = [];
     this.lastPlay = null;
+    this.shootersQueue = [];
+    this.devilVictimsQueue = [];
 
-    // Filter out eliminated players from turn order
-    this.turnOrder = this.turnOrder.filter(id => {
-      const p = this.room.getPlayer(id);
-      return p && !p.isEliminated;
+    // Filter out eliminated teams from turn order
+    this.turnOrder = this.turnOrder.filter(teamIndex => {
+      const teamPlayers = [...this.room.players.values()].filter(p => p.teamIndex === teamIndex);
+      return teamPlayers.some(p => !p.isEliminated);
     });
 
     if (this.turnOrder.length <= 1) {
@@ -91,36 +108,41 @@ class GameEngine {
       return;
     }
 
-    // Issue 4 fix: Auto-determine the rank for this round
+    // Auto-determine the rank for this round
     this.currentRank = RANKS[Math.floor(Math.random() * RANKS.length)];
 
-    // Create and deal cards (Issue 3: always 5 cards each)
-    const deck = shuffle(createDeck());
-    const activePlayers = this.turnOrder.length;
-    const { hands, remainder } = deal(deck, activePlayers);
+    // Create and deal cards (Dealt to number of active teams)
+    const activeTeamsCount = this.turnOrder.length;
+    const isChaos = this.room.settings.isChaosMode;
+    const deck = shuffle(createDeck(activeTeamsCount, isChaos));
+    const { hands, remainder } = deal(deck, activeTeamsCount, isChaos);
 
-    // Assign hands
-    this.turnOrder.forEach((playerId, index) => {
-      const player = this.room.getPlayer(playerId);
-      player.hand = hands[index];
+    // Assign hands to teams
+    this.turnOrder.forEach((teamIndex, index) => {
+      const teamPlayers = [...this.room.players.values()].filter(p => p.teamIndex === teamIndex);
+      const teamHand = hands[index];
+      teamPlayers.forEach(p => {
+        p.hand = [...teamHand]; // Teammates share the same cards
+      });
     });
 
     // Handle Devil Card Mode
     if (this.room.settings.isDevilCardMode) {
-      // Pick one random card of the current rank from all dealt hands to be the Devil Card
-      const rankCardsInHands = [];
-      this.turnOrder.forEach(pid => {
-        const p = this.room.getPlayer(pid);
-        p.hand.forEach(card => {
-          card.isDevil = false; // Reset first
-          if (card.rank === this.currentRank) {
-            rankCardsInHands.push(card);
-          }
-        });
+      const allCards = [];
+      this.turnOrder.forEach(tIdx => {
+        const teamPlayers = [...this.room.players.values()].filter(p => p.teamIndex === tIdx);
+        if (teamPlayers.length > 0) {
+          const first = teamPlayers[0];
+          first.hand.forEach(card => {
+            card.isDevil = false;
+            allCards.push(card);
+          });
+        }
       });
-
-      if (rankCardsInHands.length > 0) {
-        const devilCard = rankCardsInHands[Math.floor(Math.random() * rankCardsInHands.length)];
+      
+      const rankCards = allCards.filter(c => c.rank === this.currentRank);
+      if (rankCards.length > 0) {
+        const devilCard = rankCards[Math.floor(Math.random() * rankCards.length)];
         devilCard.isDevil = true;
         this.addLog('A Devil Card has been dealt into someone\'s hand...', 'system');
       }
@@ -128,40 +150,21 @@ class GameEngine {
 
     this.addLog(`Round ${this.roundNumber} — Cards dealt! Declare: ${this.currentRank}s`, 'system');
 
-    // Send each player their own hand + opponent info
-    for (const playerId of this.turnOrder) {
-      const player = this.room.getPlayer(playerId);
+    // Send to all players (active and eliminated/spectators)
+    this.room.players.forEach((player, pid) => {
       const socket = this.io.sockets.sockets.get(player.socketId);
       if (socket) {
         socket.emit('cards_dealt', {
           hand: player.hand,
-          players: this.getPlayersInfo(playerId),
+          players: this.getPlayersInfo(pid),
           roundNumber: this.roundNumber,
-          firstPlayerId: this.turnOrder[this.currentTurnIndex],
+          firstTeamIndex: this.turnOrder[0],
           currentRank: this.currentRank,
         });
       }
-    }
-
-    // Also send to eliminated players (spectators)
-    for (const [pid, player] of this.room.players) {
-      if (player.isEliminated) {
-        const socket = this.io.sockets.sockets.get(player.socketId);
-        if (socket) {
-          socket.emit('cards_dealt', {
-            hand: [],
-            players: this.getPlayersInfo(pid),
-            roundNumber: this.roundNumber,
-            firstPlayerId: this.turnOrder[this.currentTurnIndex],
-            currentRank: this.currentRank,
-          });
-        }
-      }
-    }
-
-    // Delay then start first turn
+    });
+    this.state = GAME_STATE.PLAYING;
     setTimeout(() => {
-      this.state = GAME_STATE.PLAYING;
       this.startTurn();
     }, 1500);
   }
@@ -169,43 +172,33 @@ class GameEngine {
   startTurn() {
     if (this.state !== GAME_STATE.PLAYING) return;
 
-    const currentPlayerId = this.turnOrder[this.currentTurnIndex];
-    const currentPlayer = this.room.getPlayer(currentPlayerId);
+    const currentTeamIndex = this.turnOrder[this.currentTurnIndex];
+    const teamPlayers = [...this.room.players.values()].filter(p => p.teamIndex === currentTeamIndex && !p.isEliminated);
+    
+    // Check if any player in team has cards
+    const teamHasCards = teamPlayers.some(p => p.hand.length > 0);
 
-    if (!currentPlayer || currentPlayer.isEliminated) {
-      this.advanceTurn();
-      return;
-    }
-
-    // If current player is disconnected, pause and wait for reconnection
-    if (!currentPlayer.isConnected) {
-      // Don't start the turn; just notify others we're waiting
-      this.pausedForDisconnect = true;
-      this.pausedPlayerId = currentPlayerId;
-      return;
-    }
-
-    // Check if all players have emptied their hands (draw round)
-    const playersWithCards = this.turnOrder.filter(id => {
-      const p = this.room.getPlayer(id);
-      return p && p.hand.length > 0;
-    });
-    if (playersWithCards.length === 0) {
-      this.addLog('All players emptied their hands — Draw round!', 'system');
-      this.io.to(this.room.code).emit('round_over', {
-        winnerId: null,
-        winnerName: null,
-        reason: 'All players emptied their hands — Draw round!',
+    if (!teamHasCards && teamPlayers.length > 0) {
+      // Check if ANY team has cards left (if not, it's a draw)
+      const anyTeamHasCards = this.turnOrder.some(tIdx => {
+        const pList = [...this.room.players.values()].filter(p => p.teamIndex === tIdx && !p.isEliminated);
+        return pList.some(p => p.hand.length > 0);
       });
-      setTimeout(() => {
-        this.currentTurnIndex = 0;
-        this.startRound();
-      }, 3000);
-      return;
-    }
 
-    // If current player has no cards, skip them
-    if (currentPlayer.hand.length === 0) {
+      if (!anyTeamHasCards) {
+        this.addLog('All teams emptied their hands — Draw round!', 'system');
+        this.io.to(this.room.code).emit('round_over', {
+          winnerId: null,
+          winnerName: null,
+          reason: 'All players emptied their hands — Draw round!',
+        });
+        setTimeout(() => {
+          this.currentTurnIndex = 0;
+          this.startRound();
+        }, 3000);
+        return;
+      }
+
       this.advanceTurn();
       this.startTurn();
       return;
@@ -215,8 +208,8 @@ class GameEngine {
     const canCallLiar = this.lastPlay !== null;
 
     this.io.to(this.room.code).emit('turn_start', {
-      playerId: currentPlayerId,
-      playerName: currentPlayer.name,
+      teamIndex: currentTeamIndex,
+      teamNames: teamPlayers.map(p => p.name).join(' & '),
       timeLimit: TURN_TIMEOUT_MS,
       canCallLiar,
       currentRank: this.currentRank,
@@ -224,13 +217,15 @@ class GameEngine {
       pileSize: this.pile.length,
     });
 
-    // Emit sound event for turn start
-    this.io.to(this.room.code).emit('sound_event', { type: 'your_turn', targetId: currentPlayerId });
+    // Emit sound event for turn start (to all team members)
+    teamPlayers.forEach(p => {
+      this.io.to(p.socketId).emit('sound_event', { type: 'your_turn' });
+    });
 
     // Start turn timer
     this.clearTurnTimer();
     this.turnTimer = setTimeout(() => {
-      this.handleTimeout(currentPlayerId);
+      this.handleTimeout(currentTeamIndex);
     }, TURN_TIMEOUT_MS);
   }
 
@@ -241,19 +236,16 @@ class GameEngine {
       return { success: false, error: 'Not in playing state' };
     }
 
-    const currentPlayerId = this.turnOrder[this.currentTurnIndex];
-    if (playerId !== currentPlayerId) {
-      return { success: false, error: 'Not your turn' };
-    }
-
+    const currentTeamIndex = this.turnOrder[this.currentTurnIndex];
     const player = this.room.getPlayer(playerId);
-    if (!player) {
-      return { success: false, error: 'Player not found' };
+    if (!player || player.teamIndex !== currentTeamIndex) {
+      return { success: false, error: 'Not your team\'s turn' };
     }
 
     // Validate card count
-    if (cardIds.length < 1 || cardIds.length > MAX_CARDS_PER_PLAY) {
-      return { success: false, error: 'Must play 1-3 cards' };
+    const maxPlay = this.room.settings.isChaosMode ? 1 : MAX_CARDS_PER_PLAY;
+    if (cardIds.length < 1 || cardIds.length > maxPlay) {
+      return { success: false, error: `Must play 1${maxPlay > 1 ? '-' + maxPlay : ''} cards` };
     }
 
     if (cardIds.length > player.hand.length) {
@@ -282,22 +274,32 @@ class GameEngine {
 
     this.clearTurnTimer();
 
-    // Remove cards from hand and add to pile
-    player.removeCards(cardIds);
+    // Remove cards from all teammates' hands
+    const teamPlayers = [...this.room.players.values()].filter(p => p.teamIndex === player.teamIndex);
+    teamPlayers.forEach(p => {
+      p.removeCards(cardIds);
+      // Notify teammates of their updated hand
+      const s = this.io.sockets.sockets.get(p.socketId);
+      if (s) s.emit('hand_update', { hand: p.hand });
+    });
+
     this.pile.push(...actualCards);
     this.pileHistory.push({ playerId, cards: actualCards });
 
     // Record last play
     this.lastPlay = {
       playerId,
+      teamIndex: player.teamIndex,
       cardIds,
       declaredRank,
       declaredCount,
       actualCards,
     };
 
+    const teamNames = teamPlayers.map(p => p.name).join(' & ');
+
     this.addLog(
-      `${player.name} played ${declaredCount} ${declaredRank}${declaredCount > 1 ? 's' : ''}`,
+      `${teamNames} played ${declaredCount} ${declaredRank}${declaredCount > 1 ? 's' : ''}`,
       'play'
     );
 
@@ -305,6 +307,7 @@ class GameEngine {
     this.io.to(this.room.code).emit('cards_played', {
       playerId,
       playerName: player.name,
+      teamIndex: player.teamIndex,
       numCards: cardIds.length,
       declaredRank,
       declaredCount,
@@ -339,19 +342,21 @@ class GameEngine {
       return { success: false, error: 'No previous play to challenge' };
     }
 
-    const currentPlayerId = this.turnOrder[this.currentTurnIndex];
-    if (challengerId !== currentPlayerId) {
-      return { success: false, error: 'Not your turn to call liar' };
+    const currentTeamIndex = this.turnOrder[this.currentTurnIndex];
+    const challenger = this.room.getPlayer(challengerId);
+    if (challenger.teamIndex !== currentTeamIndex) {
+      return { success: false, error: 'Not your team\'s turn to call liar' };
     }
 
     this.clearTurnTimer();
     this.state = GAME_STATE.CHALLENGE_REVEAL;
 
-    const challenger = this.room.getPlayer(challengerId);
     const challenged = this.room.getPlayer(this.lastPlay.playerId);
+    const challengedTeamPlayers = [...this.room.players.values()].filter(p => p.teamIndex === challenged.teamIndex);
+    const challengedTeamNames = challengedTeamPlayers.map(p => p.name).join(' & ');
 
     this.addLog(
-      `${challenger.name} called LIAR on ${challenged.name}!`,
+      `${challenger.name} called LIAR on ${challengedTeamNames}!`,
       'challenge'
     );
 
@@ -359,88 +364,72 @@ class GameEngine {
     this.io.to(this.room.code).emit('liar_called', {
       challengerId,
       challengerName: challenger.name,
+      challengerTeamIndex: challenger.teamIndex,
       challengedId: this.lastPlay.playerId,
       challengedName: challenged.name,
+      challengedTeamIndex: challenged.teamIndex,
     });
     this.io.to(this.room.code).emit('sound_event', { type: 'liar_called' });
 
     // Reveal after a delay (for animation)
     setTimeout(() => {
-      const { declaredRank, actualCards } = this.lastPlay;
-      const wasLying = !actualCards.every(
-        card => card.rank === declaredRank || card.rank === JOKER
-      );
-      const hasDevilCard = actualCards.some(card => card.isDevil);
-      
-      // Trigger Devil effect ONLY if truthful placement containing Devil Card
-      if (hasDevilCard && !wasLying) {
-        this.triggerDevilCard(challengerId);
-      } else {
-        this.resolveChallenge(challengerId);
-      }
+      this.resolveChallenge(challengerId);
     }, 2000);
 
     return { success: true };
   }
 
   triggerDevilCard(challengerId) {
-    const placerId = this.lastPlay.playerId;
-    const placer = this.room.getPlayer(placerId);
-    
-    this.addLog(`😈 DEVIL CARD REVEALED by ${placer.name}!`, 'devil');
-    
-    // Everyone except the placer loses 1 bullet
-    const victims = [];
-    for (const [pid, player] of this.room.players) {
-      if (pid !== placerId && !player.isEliminated) {
-        const fired = player.forceLoseBullet(); // This now uses pullTrigger() chance
-        
-        victims.push({
-          id: player.id,
-          name: player.name,
-          fired: fired,
-          shotsTaken: player.shotsTaken,
-          isEliminated: player.isEliminated
-        });
-        
-        // Emit shooting animation for each victim with ACTUAL fired state
-        this.io.to(this.room.code).emit('revolver_result', {
-            playerId: player.id,
-            playerName: player.name,
-            fired: fired,
-            isDevilTrigger: true,
-            isEliminated: player.isEliminated,
-            shotsTaken: player.shotsTaken
-        });
-
-        if (player.isEliminated) {
-          this.addLog(`💀 ${player.name} was eliminated by the Devil Card!`, 'elimination');
-        } else {
-          this.addLog(`😮‍💨 ${player.name} survived the Devil Card shot!`, 'survive');
-        }
-      }
-    }
-
-    // Emit dramatic reveal event
-    this.io.to(this.room.code).emit('devil_card_triggered', {
-      placerId,
-      placerName: placer.name,
-      cards: this.lastPlay.actualCards,
-      victims: victims // Pass the actual results
-    });
-    this.io.to(this.room.code).emit('sound_event', { type: 'devil_laugh' });
-
     // Mark the card as no longer devil so it doesn't trigger again if picked up
     this.lastPlay.actualCards.forEach(card => card.isDevil = false);
 
-    // After a delay for the dramatic effect, resolve the liar call normally
-    setTimeout(() => {
-      // Update everyone's info (bullets changed)
+    const placerId = this.lastPlay.playerId;
+    this.lastChallengerId = challengerId;
+
+    this.devilVictimsQueue = [];
+    // Each team that is NOT the placer's team gets shot once
+    const teamIndices = new Set();
+    for (const [pid, player] of this.room.players) {
+      if (player.teamIndex !== this.lastPlay.teamIndex && !player.isEliminated) {
+        teamIndices.add(player.teamIndex);
+      }
+    }
+    
+    // Add one player from each team to the queue
+    for (const tIdx of teamIndices) {
+      const p = [...this.room.players.values()].find(player => player.teamIndex === tIdx && !player.isEliminated);
+      if (p) this.devilVictimsQueue.push(p.id);
+    }
+
+    this.processNextDevilShot();
+  }
+
+  processNextDevilShot() {
+    if (this.devilVictimsQueue.length === 0) {
+      // All devil shots done, start the next round
       this.broadcastPlayerInfo();
-      
-      // Resolve the challenge as normal
-      this.resolveChallenge(challengerId);
-    }, 4000); // 4 seconds for dramatic effect
+
+      const activePlayers = this.room.getActivePlayers();
+      if (activePlayers.length <= 1) {
+        this.endGame();
+        return;
+      }
+
+      // Loser of challenge (challenger) goes first next round if alive
+      const loserId = this.lastChallengerId;
+      const loser = this.room.getPlayer(loserId);
+      if (loser && !loser.isEliminated) {
+        this.currentTurnIndex = this.turnOrder.indexOf(loser.teamIndex);
+        if (this.currentTurnIndex === -1) this.currentTurnIndex = 0;
+      } else {
+        this.currentTurnIndex = 0;
+      }
+      this.startRound();
+      return;
+    }
+
+    const nextVictimId = this.devilVictimsQueue.shift();
+    this.handleRevolver(nextVictimId, null, null, true); // true = isDevilSequence
   }
 
   resolveChallenge(challengerId) {
@@ -449,10 +438,13 @@ class GameEngine {
     const challenged = this.room.getPlayer(challengedId);
 
     // Check if all played cards match the declared rank
-    // Jokers are WILD — they count as any rank
+    // Jokers, Chaos, and Master are WILD — they count as any rank
     const wasLying = !actualCards.every(
-      card => card.rank === declaredRank || card.rank === JOKER
+      card => card.rank === declaredRank || card.rank === JOKER || card.rank === CHAOS || card.rank === MASTER
     );
+
+    const hasDevilCard = actualCards.some(card => card.isDevil);
+    const isDevilTrigger = hasDevilCard && !wasLying;
 
     // Emit reveal + sound
     this.io.to(this.room.code).emit('cards_revealed', {
@@ -463,6 +455,7 @@ class GameEngine {
       challengerName: challenger.name,
       challengedId,
       challengedName: challenged.name,
+      hasDevilCard: isDevilTrigger
     });
 
     if (wasLying) {
@@ -474,37 +467,227 @@ class GameEngine {
     // Determine loser
     const loserId = wasLying ? challengedId : challengerId;
     const loser = this.room.getPlayer(loserId);
+    const loserTeamPlayers = [...this.room.players.values()].filter(p => p.teamIndex === loser.teamIndex);
+    const loserTeamNames = loserTeamPlayers.map(p => p.name).join(' & ');
+
+    const challengedTeamPlayers = [...this.room.players.values()].filter(p => p.teamIndex === challenged.teamIndex);
+    const challengedTeamNames = challengedTeamPlayers.map(p => p.name).join(' & ');
+
     const reason = wasLying
-      ? `${challenged.name} was caught lying!`
-      : `${challenger.name} was wrong — ${challenged.name} told the truth!`;
+      ? `${challengedTeamNames} were caught lying!`
+      : `${challenger.name}'s team was wrong — ${challengedTeamNames} told the truth!`;
 
     this.addLog(reason, 'result');
 
-    // Loser picks up the entire pile
-    loser.addCards([...this.pile]);
-    this.pile = [];
+    // Loser team picks up the entire pile
+    loserTeamPlayers.forEach(p => {
+      p.addCards([...this.pile]);
+      // Notify teammates of their updated hand
+      const s = this.io.sockets.sockets.get(p.socketId);
+      if (s) s.emit('hand_update', { hand: p.hand });
+    });
 
     this.io.to(this.room.code).emit('challenge_result', {
       loserId,
       loserName: loser.name,
+      teamIndex: loser.teamIndex,
       wasLying,
       reason,
-      pileSize: this.pile.length,
+      pileSize: 0,
     });
+    this.pile = [];
 
-    // Send updated hand to the loser
-    const loserSocket = this.io.sockets.sockets.get(loser.socketId);
-    if (loserSocket) {
-      loserSocket.emit('hand_update', { hand: loser.hand });
+    // Determine what happens next based on Chaos Mode
+    if (this.room.settings.isChaosMode) {
+      const hasChaos = actualCards.some(c => c.rank === CHAOS);
+
+      if (hasChaos) {
+        this.addLog(`🌪️ CHAOS CARD REVEALED! Everyone gets to shoot!`, 'devil');
+        this.io.to(this.room.code).emit('sound_event', { type: 'devil_laugh' });
+
+        setTimeout(() => {
+          this.beginChaosTargeting();
+        }, 2500);
+      } else {
+        // Normal Chaos mode or Master Card: winner of the challenge picks a target
+        if (isDevilTrigger) {
+          // Trigger the Devil Card shots AFTER the cards are revealed
+          setTimeout(() => {
+            this.triggerDevilCard(challengerId);
+          }, 3000);
+        } else {
+          const winnerId = wasLying ? challengerId : challengedId;
+          setTimeout(() => {
+            this.beginTargeting(winnerId, loserId);
+          }, 2500);
+        }
+      }
+    } else {
+      if (isDevilTrigger) {
+        // Trigger the Devil Card shots AFTER the cards are revealed
+        setTimeout(() => {
+          this.triggerDevilCard(challengerId);
+        }, 3000);
+      } else {
+        // Normal Mode: Russian Roulette for the loser after a delay
+        setTimeout(() => {
+          this.handleRevolver(loserId, challengerId, challengedId);
+        }, 3000);
+      }
     }
-
-    // Russian Roulette for the loser after a delay
-    setTimeout(() => {
-      this.handleRevolver(loserId, challengerId, challengedId);
-    }, 2500);
   }
 
-  handleRevolver(loserId, challengerId, challengedId) {
+  // ========== CHAOS MODE TARGETING ==========
+
+  beginTargeting(shooterId, previousLoserId) {
+    this.state = GAME_STATE.TARGETING;
+    this.currentShooterId = shooterId;
+
+    const shooter = this.room.getPlayer(shooterId);
+    this.addLog(`🎯 ${shooter.name} is choosing a target...`, 'system');
+
+    // Filter alive players for valid targets
+    const validTargets = this.room.getActivePlayers().map(p => p.id);
+
+    this.io.to(this.room.code).emit('targeting_started', {
+      shooterId,
+      shooterName: shooter.name,
+      validTargets
+    });
+  }
+
+  beginChaosTargeting() {
+    this.state = GAME_STATE.CHAOS_TARGETING;
+
+    // Queue all alive players as shooters
+    const alivePlayers = this.room.getActivePlayers();
+    this.shootersQueue = alivePlayers.map(p => p.id);
+
+    // Start with the first shooter
+    this.processNextChaosShooter();
+  }
+
+  processNextChaosShooter() {
+    if (this.shootersQueue.length === 0) {
+      // Chaos targeting complete, start next round
+      // Check if game should end
+      const activePlayers = this.room.getActivePlayers();
+      if (activePlayers.length <= 1) {
+        setTimeout(() => this.endGame(), 2000);
+        return;
+      }
+
+      setTimeout(() => {
+        this.startRound();
+      }, 3000);
+      return;
+    }
+
+    const nextShooterId = this.shootersQueue.shift();
+    const shooter = this.room.getPlayer(nextShooterId);
+
+    // If they were eliminated during the chaos (by someone else), skip them
+    if (!shooter || shooter.isEliminated) {
+      this.processNextChaosShooter();
+      return;
+    }
+
+    this.currentShooterId = nextShooterId;
+    const validTargets = this.room.getActivePlayers().map(p => p.id);
+
+    this.addLog(`🌪️ CHAOS: ${shooter.name} is choosing a target...`, 'system');
+    this.io.to(this.room.code).emit('targeting_started', {
+      shooterId: nextShooterId,
+      shooterName: shooter.name,
+      validTargets,
+      isChaosMass: true
+    });
+  }
+
+  selectTarget(shooterId, targetId) {
+    if (this.state !== GAME_STATE.TARGETING && this.state !== GAME_STATE.CHAOS_TARGETING) {
+      return { success: false, error: 'Not in targeting phase' };
+    }
+
+    if (shooterId !== this.currentShooterId) {
+      return { success: false, error: 'Not your turn to shoot' };
+    }
+
+    const target = this.room.getPlayer(targetId);
+    if (!target || target.isEliminated) {
+      return { success: false, error: 'Invalid target' };
+    }
+
+    // Resolve the shot on the target
+    this.handleTargetedRevolver(shooterId, targetId);
+
+    return { success: true };
+  }
+
+  handleTargetedRevolver(shooterId, targetId) {
+    const target = this.room.getPlayer(targetId);
+    const shooter = this.room.getPlayer(shooterId);
+
+    // Emit roulette spin sound
+    this.io.to(this.room.code).emit('sound_event', { type: 'roulette_spin' });
+
+    const fired = target.pullTrigger();
+
+    this.io.to(this.room.code).emit('revolver_result', {
+      playerId: targetId,
+      playerName: target.name,
+      shooterId: shooterId,
+      shooterName: shooter.name,
+      fired,
+      currentChamber: target.currentChamber,
+      isEliminated: target.isEliminated
+    });
+
+    // Emit fire/click sound
+    setTimeout(() => {
+      let soundType = 'roulette_click';
+      if (fired) {
+        soundType = target.isEliminated ? 'player_eliminated' : 'roulette_fire';
+      }
+      this.io.to(this.room.code).emit('sound_event', { type: soundType });
+    }, 1200);
+
+    if (fired) {
+      this.addLog(`💥 BANG! ${shooter.name} shot ${target.name}!`, 'elimination');
+      if (target.isEliminated) {
+        this.addLog(`💀 ${target.name} has been eliminated!`, 'elimination');
+      }
+      this.io.to(this.room.code).emit('player_eliminated', {
+        playerId: targetId,
+        playerName: target.name,
+        isEliminated: target.isEliminated,
+        shotsTaken: target.shotsTaken
+      });
+    } else {
+      this.addLog(`😮‍💨 ${target.name} survived ${shooter.name}'s shot!`, 'survive');
+    }
+
+    // Determine what to do next
+    setTimeout(() => {
+      if (this.state === GAME_STATE.CHAOS_TARGETING) {
+        this.processNextChaosShooter();
+      } else {
+        // Normal targeting complete
+        const activePlayers = this.room.getActivePlayers();
+        if (activePlayers.length <= 1) {
+          this.endGame();
+        } else {
+          // In Chaos mode, start next round. Winner (shooter) usually goes first? Or next person.
+          // Let's just make the shooter go first.
+          this.currentTurnIndex = this.turnOrder.indexOf(shooterId);
+          if (this.currentTurnIndex === -1) this.currentTurnIndex = 0;
+          this.startRound();
+        }
+      }
+    }, 3000);
+  }
+
+  handleRevolver(loserId, challengerId, challengedId, isDevilSequence = false) {
     this.state = GAME_STATE.REVOLVER;
     const loser = this.room.getPlayer(loserId);
 
@@ -513,22 +696,38 @@ class GameEngine {
 
     const fired = loser.pullTrigger();
 
+    // Sync team status (all teammates share the same lives/death)
+    const teamPlayers = [...this.room.players.values()].filter(p => p.teamIndex === loser.teamIndex);
+    teamPlayers.forEach(p => {
+      p.shotsTaken = loser.shotsTaken;
+      p.isEliminated = loser.isEliminated;
+    });
+
     this.io.to(this.room.code).emit('revolver_result', {
       playerId: loserId,
       playerName: loser.name,
+      teamIndex: loser.teamIndex,
       fired,
       currentChamber: loser.currentChamber,
+      isEliminated: loser.isEliminated
     });
 
-    // Emit fire sound
+    // Emit fire/click sound
     setTimeout(() => {
-      this.io.to(this.room.code).emit('sound_event', { type: 'roulette_fire' });
+      let soundType = 'roulette_click';
+      if (fired) {
+        soundType = loser.isEliminated ? 'player_eliminated' : 'roulette_fire';
+      }
+      this.io.to(this.room.code).emit('sound_event', { type: soundType });
     }, 1200);
 
     if (fired) {
-      this.addLog(`💥 BANG! ${loser.name} lost a bullet!`, 'elimination');
+      const teamPlayers = [...this.room.players.values()].filter(p => p.teamIndex === loser.teamIndex);
+      const teamNames = teamPlayers.map(p => p.name).join(' & ');
+      
+      this.addLog(`💥 BANG! ${teamNames} got shot!`, 'elimination');
       if (loser.isEliminated) {
-        this.addLog(`💀 ${loser.name} has been eliminated!`, 'elimination');
+        this.addLog(`💀 ${teamNames} have been eliminated!`, 'elimination');
       }
       this.io.to(this.room.code).emit('player_eliminated', {
         playerId: loserId,
@@ -536,7 +735,6 @@ class GameEngine {
         isEliminated: loser.isEliminated,
         shotsTaken: loser.shotsTaken
       });
-      this.io.to(this.room.code).emit('sound_event', { type: 'roulette_fire' });
     } else {
       this.addLog(`${loser.name} survived the shot!`, 'survive');
     }
@@ -548,21 +746,20 @@ class GameEngine {
       return;
     }
 
-    // Start new round after delay — loser goes first (if alive), otherwise next alive
+    // Start new round after delay
     setTimeout(() => {
-      if (!loser.isEliminated) {
-        this.currentTurnIndex = this.turnOrder.indexOf(loserId);
-        if (this.currentTurnIndex === -1) this.currentTurnIndex = 0;
+      if (isDevilSequence) {
+        this.processNextDevilShot();
       } else {
-        // Find next alive player after the eliminated one
-        this.turnOrder = this.turnOrder.filter(id => {
-          const p = this.room.getPlayer(id);
-          return p && !p.isEliminated;
-        });
-        this.currentTurnIndex = 0;
+        if (!loser.isEliminated) {
+          this.currentTurnIndex = this.turnOrder.indexOf(loser.teamIndex);
+          if (this.currentTurnIndex === -1) this.currentTurnIndex = 0;
+        } else {
+          this.currentTurnIndex = 0;
+        }
+        this.startRound();
       }
-      this.startRound();
-    }, 3000);
+    }, 4500); // 4.5s matches the client's revolver overlay duration
   }
 
   // handleRoundWin removed — Issue 2: round only ends on liar call or all-empty draw
@@ -578,21 +775,36 @@ class GameEngine {
     }
     this.disconnectedTimers.clear();
 
-    // Build rankings
-    const allPlayers = [...this.room.players.values()];
+    // Build rankings (by team)
+    const teamIndices = new Set();
+    this.room.players.forEach(p => {
+      if (p.teamIndex !== null) teamIndices.add(p.teamIndex);
+    });
+
+    const teamData = Array.from(teamIndices).map(tIdx => {
+      const members = [...this.room.players.values()].filter(p => p.teamIndex === tIdx);
+      const first = members[0];
+      return {
+        teamIndex: tIdx,
+        names: members.map(p => p.name).join(' & '),
+        isEliminated: first.isEliminated,
+        cardsLeft: first.hand.length,
+        memberIds: members.map(p => p.id)
+      };
+    });
+
+    const aliveTeams = teamData.filter(t => !t.isEliminated).sort((a, b) => a.cardsLeft - b.cardsLeft);
+    const eliminatedTeams = teamData.filter(t => t.isEliminated);
+
     const rankings = [];
-
-    // Active (surviving) players first, sorted by hand size (fewer = better)
-    const alive = allPlayers.filter(p => !p.isEliminated).sort((a, b) => a.hand.length - b.hand.length);
-    const eliminated = allPlayers.filter(p => p.isEliminated);
-
     let position = 1;
-    for (const p of alive) {
-      rankings.push({ id: p.id, name: p.name, position: position++, eliminated: false, cardsLeft: p.hand.length });
+    for (const t of aliveTeams) {
+      rankings.push({ ...t, position: position++ });
     }
-    // Eliminated players in reverse elimination order (last eliminated = better rank)
-    for (const p of eliminated.reverse()) {
-      rankings.push({ id: p.id, name: p.name, position: position++, eliminated: true, cardsLeft: p.hand.length });
+    // Note: for eliminated teams, we don't have a strict "elimination order" stored easily
+    // so we just add them.
+    for (const t of eliminatedTeams) {
+      rankings.push({ ...t, position: position++ });
     }
 
     this.addLog('Game Over!', 'system');
@@ -603,26 +815,27 @@ class GameEngine {
 
   // ========== TIMEOUT ==========
 
-  handleTimeout(playerId) {
-    const player = this.room.getPlayer(playerId);
-    if (!player || this.state !== GAME_STATE.PLAYING) return;
+  handleTimeout(teamIndex) {
+    const teamPlayers = [...this.room.players.values()].filter(p => p.teamIndex === teamIndex && !p.isEliminated);
+    if (teamPlayers.length === 0 || this.state !== GAME_STATE.PLAYING) return;
 
-    const currentPlayerId = this.turnOrder[this.currentTurnIndex];
-    if (playerId !== currentPlayerId) return;
+    const currentTeamIndex = this.turnOrder[this.currentTurnIndex];
+    if (teamIndex !== currentTeamIndex) return;
 
-    // Auto-play: play 1 random card, declare the round's rank
-    if (player.hand.length > 0) {
-      const randomCard = player.hand[0];
+    // Auto-play: play 1 random card from someone on the team
+    const playerWithCards = teamPlayers.find(p => p.hand.length > 0);
+    if (playerWithCards) {
+      const randomCard = playerWithCards.hand[0];
       const rank = this.currentRank;
 
-      this.addLog(`⏰ ${player.name} ran out of time — auto-played 1 ${rank}`, 'timeout');
+      this.addLog(`⏰ ${playerWithCards.name}'s team ran out of time — auto-played 1 ${rank}`, 'timeout');
 
       this.io.to(this.room.code).emit('turn_timeout', {
-        playerId,
-        playerName: player.name,
+        teamIndex,
+        playerName: playerWithCards.name,
       });
 
-      this.playCards(playerId, [randomCard.id], rank, 1);
+      this.playCards(playerWithCards.id, [randomCard.id], rank, 1);
     }
   }
 
@@ -645,12 +858,12 @@ class GameEngine {
       disconnectedAt: player.disconnectedAt,
     });
 
-    // If it was the disconnected player's turn, pause the timer
-    const currentPlayerId = this.turnOrder[this.currentTurnIndex];
-    if (currentPlayerId === playerId && this.state === GAME_STATE.PLAYING) {
+    // If any member of the current turn team disconnected, pause
+    const currentTeamIndex = this.turnOrder[this.currentTurnIndex];
+    if (player.teamIndex === currentTeamIndex && this.state === GAME_STATE.PLAYING) {
       this.clearTurnTimer();
       this.pausedForDisconnect = true;
-      this.pausedPlayerId = playerId;
+      this.pausedPlayerId = playerId; // We still track the specific player for resumption
     }
 
     this.broadcastPlayerInfo();
@@ -681,9 +894,14 @@ class GameEngine {
     });
     this.io.to(this.room.code).emit('sound_event', { type: 'player_eliminated' });
 
-    // Remove from turn order
-    const wasCurrentTurn = this.turnOrder[this.currentTurnIndex] === playerId;
-    this.turnOrder = this.turnOrder.filter(id => id !== playerId);
+    // Remove from turn order if entire team is eliminated
+    const teamIndex = player.teamIndex;
+    const teamPlayers = [...this.room.players.values()].filter(p => p.teamIndex === teamIndex);
+    const isTeamAlive = teamPlayers.some(p => !p.isEliminated);
+    
+    if (!isTeamAlive) {
+      this.turnOrder = this.turnOrder.filter(tIdx => tIdx !== teamIndex);
+    }
 
     if (this.turnOrder.length === 0) {
       this.endGame();
@@ -772,8 +990,10 @@ class GameEngine {
     do {
       this.currentTurnIndex = (this.currentTurnIndex + 1) % this.turnOrder.length;
       attempts++;
-      const player = this.room.getPlayer(this.turnOrder[this.currentTurnIndex]);
-      if (player && !player.isEliminated) break;
+      const teamIndex = this.turnOrder[this.currentTurnIndex];
+      const teamPlayers = [...this.room.players.values()].filter(p => p.teamIndex === teamIndex);
+      const isTeamAlive = teamPlayers.some(p => !p.isEliminated);
+      if (isTeamAlive) break;
     } while (attempts < this.turnOrder.length);
   }
 
@@ -802,7 +1022,7 @@ class GameEngine {
       if (socket) {
         socket.emit('players_update', {
           players: this.getPlayersInfo(pid),
-          currentTurnId: this.turnOrder[this.currentTurnIndex] || null,
+          currentTeamIndex: this.turnOrder[this.currentTurnIndex] !== undefined ? this.turnOrder[this.currentTurnIndex] : null,
         });
       }
     }
@@ -827,7 +1047,7 @@ class GameEngine {
       currentRank: this.currentRank,
       pileSize: this.pile.length,
       roundNumber: this.roundNumber,
-      currentPlayerId: this.turnOrder[this.currentTurnIndex],
+      currentTeamIndex: this.turnOrder[this.currentTurnIndex],
       turnOrder: this.turnOrder,
       lastPlay: this.lastPlay ? {
         playerId: this.lastPlay.playerId,

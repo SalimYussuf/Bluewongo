@@ -13,6 +13,7 @@ class Room {
     };
 
     hostPlayer.isHost = true;
+    hostPlayer.teamIndex = 0; // Host starts in slot 0
     this.players.set(hostPlayer.id, hostPlayer);
   }
 
@@ -28,6 +29,24 @@ class Room {
     if (this.state !== ROOM_STATE.WAITING) {
       return { success: false, error: 'Game already in progress' };
     }
+
+    // Assign to a team slot (0-3)
+    const counts = [0, 0, 0, 0];
+    this.players.forEach(p => {
+      if (typeof p.teamIndex === 'number' && p.teamIndex >= 0 && p.teamIndex < 4) {
+        counts[p.teamIndex]++;
+      }
+    });
+
+    // Find first slot with 0 players, then first with 1 player
+    let slot = counts.indexOf(0);
+    if (slot === -1) slot = counts.indexOf(1);
+    
+    // Fallback just in case something went wrong with counts
+    if (slot === -1) slot = 0; 
+    
+    player.teamIndex = slot;
+
     this.players.set(player.id, player);
     return { success: true };
   }
@@ -62,10 +81,14 @@ class Room {
   }
 
   canStart() {
-    return (
-      this.state === ROOM_STATE.WAITING &&
-      this.players.size >= MIN_PLAYERS
-    );
+    if (this.state !== ROOM_STATE.WAITING) return false;
+    const teamIndices = new Set();
+    this.players.forEach(p => {
+      if (typeof p.teamIndex === 'number' && p.teamIndex >= 0 && p.teamIndex < 4) {
+        teamIndices.add(p.teamIndex);
+      }
+    });
+    return teamIndices.size >= 2;
   }
 
   isEmpty() {

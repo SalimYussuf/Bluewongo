@@ -24,7 +24,10 @@
     soundEnabled: true,
     settings: {
       isDevilCardMode: false,
+      isChaosMode: false,
     },
+    targetingMode: false, // true when player needs to select a target
+    chaosTargetingMode: false, // true during chaos mass-shootout
   };
 
   // ===== DOM REFS =====
@@ -49,6 +52,7 @@
   const btnLeave = $('btn-leave-room');
   const roomSettingsPanel = $('room-settings-panel');
   const toggleDevilMode = $('toggle-devil-mode');
+  const toggleChaosMode = $('toggle-chaos-mode');
 
   // Game
   const handContainer = $('hand-container');
@@ -71,6 +75,8 @@
   const gameLog = $('game-log');
   const btnMute = $('btn-mute');
   const devilBanner = $('devil-banner');
+  const targetingBanner = $('targeting-banner');
+  const targetingText = $('targeting-text');
 
   // Overlays
   const revealOverlay = $('reveal-overlay');
@@ -92,11 +98,37 @@
 
   // ===== CARD SYMBOLS =====
   const rankSymbols = {
-    Ace: { symbol: 'A', icon: '♠' },
-    King: { symbol: 'K', icon: '♚' },
-    Queen: { symbol: 'Q', icon: '♛' },
-    Joker: { symbol: '★', icon: '🃏' },
+    'Ace': { symbol: 'A', icon: '♠️' },
+    'King': { symbol: 'K', icon: '👑' },
+    'Queen': { symbol: 'Q', icon: '⚜️' },
+    'Joker': { symbol: 'J', icon: '🃏' },
+    'Chaos': { symbol: 'C', icon: '🌪️' },
+    'Master': { symbol: 'M', icon: '🏆' }
   };
+
+  // ===== AUDIO =====
+  function playSound(type) {
+    if (!state.soundEnabled) return;
+
+    let fileName = type;
+
+    // Only liar_caught supports randomized versions (1, 2, or 3)
+    if (type === 'liar_caught') {
+      const rand = Math.floor(Math.random() * 3) + 1;
+      fileName = `${type}${rand}`;
+    }
+
+    const audio = new Audio(`sounds/${fileName}.mp3`);
+    audio.play().catch(e => {
+      // Fallback: If randomized version fails, try the base name
+      if (fileName !== type) {
+        const fallback = new Audio(`sounds/${type}.mp3`);
+        fallback.play().catch(err => console.warn(`Sound playback failed: sounds/${type}.mp3`));
+      } else {
+        console.warn(`Sound playback failed: sounds/${type}.mp3`);
+      }
+    });
+  }
 
   const avatarColors = ['#818cf8', '#f59e0b', '#ec4899', '#10b981', '#a855f7', '#06b6d4'];
 
@@ -113,39 +145,6 @@
     toast.textContent = msg;
     $('toast-container').appendChild(toast);
     setTimeout(() => toast.remove(), 3000);
-  }
-
-  // ===== AUDIO ENGINE =====
-  const sounds = {
-    card_placed: new Audio('sounds/card_placed.mp3'),
-    liar_called: new Audio('sounds/liar_called.mp3'),
-    liar_caught: new Audio('sounds/liar_caught.mp3'),
-    truth_told: new Audio('sounds/truth_told.mp3'),
-    your_turn: new Audio('sounds/your_turn.mp3'),
-    roulette_spin: new Audio('sounds/roulette_spin.mp3'),
-    roulette_fire: new Audio('sounds/roulette_fire.mp3'),
-    game_win: new Audio('sounds/game_win.mp3'),
-    player_joined: new Audio('sounds/player_joined.mp3'),
-    player_eliminated: new Audio('sounds/player_eliminated.mp3'),
-    devil_laugh: new Audio('sounds/devil_laugh.mp3')
-  };
-
-  // Preload and adjust volumes if needed
-  Object.values(sounds).forEach(audio => {
-    audio.preload = 'auto';
-    audio.volume = 0.7; // default volume
-  });
-
-  function playSound(type) {
-    if (!state.soundEnabled) return;
-    const sound = sounds[type];
-    if (sound) {
-      sound.currentTime = 0; // reset to start
-      sound.play().catch(err => {
-        // Ignore playback errors (e.g. user hasn't interacted with page yet, or file missing)
-        console.warn(`Could not play sound: ${type}`, err);
-      });
-    }
   }
 
   btnMute.addEventListener('click', () => {
@@ -196,10 +195,22 @@
 
   toggleDevilMode.addEventListener('change', () => {
     if (!state.isHost) return;
-    socket.emit('update_settings', {
-      roomCode: state.roomCode,
-      settings: { isDevilCardMode: toggleDevilMode.checked }
-    });
+    const settings = { isDevilCardMode: toggleDevilMode.checked };
+    if (toggleDevilMode.checked && toggleChaosMode.checked) {
+      settings.isChaosMode = false;
+      toggleChaosMode.checked = false;
+    }
+    socket.emit('update_settings', { roomCode: state.roomCode, settings });
+  });
+
+  toggleChaosMode.addEventListener('change', () => {
+    if (!state.isHost) return;
+    const settings = { isChaosMode: toggleChaosMode.checked };
+    if (toggleChaosMode.checked && toggleDevilMode.checked) {
+      settings.isDevilCardMode = false;
+      toggleDevilMode.checked = false;
+    }
+    socket.emit('update_settings', { roomCode: state.roomCode, settings });
   });
 
   function showRoomLobby(roomCode, players, hostId) {
@@ -213,53 +224,74 @@
     // Show settings panel if host
     roomSettingsPanel.style.display = 'block';
     toggleDevilMode.disabled = !state.isHost;
+    toggleChaosMode.disabled = !state.isHost;
   }
 
   function updatePlayerList(players, hostId) {
     state.isHost = (hostId === state.playerId);
     playerList.innerHTML = '';
 
-    players.forEach((p, i) => {
-      const li = document.createElement('li');
-      li.className = 'player-item';
+    // Group players by team slot
+    const teams = {};
+    players.forEach(p => {
+      if (!teams[p.teamIndex]) teams[p.teamIndex] = [];
+      teams[p.teamIndex].push(p);
+    });
 
-      const avatar = document.createElement('div');
-      avatar.className = 'player-avatar';
-      avatar.style.background = avatarColors[i % avatarColors.length];
-      avatar.textContent = p.name.charAt(0).toUpperCase();
+    Object.keys(teams).sort().forEach((tIdx) => {
+      const teamPlayers = teams[tIdx];
+      
+      const teamWrapper = document.createElement('div');
+      teamWrapper.className = 'team-lobby-slot glass';
+      
+      const label = (tIdx === 'null' || tIdx === 'undefined') ? 'Assigning...' : `Slot ${parseInt(tIdx) + 1}`;
+      teamWrapper.innerHTML = `<div class="team-slot-header">${label}</div>`;
 
-      const name = document.createElement('span');
-      name.className = 'player-name';
-      name.textContent = p.name;
+      teamPlayers.forEach((p) => {
+        const item = document.createElement('div');
+        item.className = 'player-item';
 
-      li.appendChild(avatar);
-      li.appendChild(name);
+        const avatar = document.createElement('div');
+        avatar.className = 'player-avatar';
+        const colorIndex = (tIdx === 'null' || tIdx === 'undefined') ? 0 : parseInt(tIdx);
+        avatar.style.background = avatarColors[colorIndex % avatarColors.length];
+        avatar.textContent = p.name.charAt(0).toUpperCase();
 
-      if (p.id === state.playerId) {
-        const badge = document.createElement('span');
-        badge.className = 'player-badge badge-you';
-        badge.textContent = 'You';
-        li.appendChild(badge);
-      }
-      if (p.id === hostId) {
-        const badge = document.createElement('span');
-        badge.className = 'player-badge badge-host';
-        badge.textContent = '👑 Host';
-        li.appendChild(badge);
-      }
-      if (p.isReady) {
-        const badge = document.createElement('span');
-        badge.className = 'player-badge badge-ready';
-        badge.textContent = '✓ Ready';
-        li.appendChild(badge);
-      }
+        const nameText = document.createElement('span');
+        nameText.className = 'player-name';
+        nameText.textContent = p.name;
 
-      playerList.appendChild(li);
+        item.appendChild(avatar);
+        item.appendChild(nameText);
+
+        if (p.id === state.playerId) {
+          const badge = document.createElement('span');
+          badge.className = 'player-badge badge-you';
+          badge.textContent = 'You';
+          item.appendChild(badge);
+        }
+        if (p.id === hostId) {
+          const badge = document.createElement('span');
+          badge.className = 'player-badge badge-host';
+          badge.textContent = '👑 Host';
+          item.appendChild(badge);
+        }
+        if (p.isReady) {
+          const badge = document.createElement('span');
+          badge.className = 'player-badge badge-ready';
+          badge.textContent = '✓ Ready';
+          item.appendChild(badge);
+        }
+
+        teamWrapper.appendChild(item);
+      });
+      playerList.appendChild(teamWrapper);
     });
 
     // Show start button for host
     btnStart.style.display = state.isHost ? 'block' : 'none';
-    btnStart.disabled = players.length < 2;
+    const teamCount = Object.keys(teams).filter(k => k !== 'null' && k !== 'undefined').length;
+    btnStart.disabled = teamCount < 2;
   }
 
   function resetToJoin() {
@@ -313,11 +345,14 @@
     const idx = state.selectedCardIds.indexOf(cardId);
     if (idx > -1) {
       state.selectedCardIds.splice(idx, 1);
-    } else if (state.selectedCardIds.length < 3) {
-      state.selectedCardIds.push(cardId);
     } else {
-      showToast('Max 3 cards!', 'warning');
-      return;
+      const limit = state.settings.isChaosMode ? 1 : 3;
+      if (state.selectedCardIds.length < limit) {
+        state.selectedCardIds.push(cardId);
+      } else {
+        showToast(`Max ${limit} cards!`, 'warning');
+        return;
+      }
     }
 
     renderHand();
@@ -325,41 +360,80 @@
   }
 
   // ===== GAME — OPPONENTS & PLAYER LIVES =====
-  function renderOpponents(players, currentTurnId = null) {
+  function renderOpponents(players, currentTurnTeamIndex = null) {
     const seats = [$('seat-left'), $('seat-top'), $('seat-right')];
     seats.forEach(s => s.innerHTML = '');
 
-    const opponents = players.filter(p => p.id !== state.playerId);
+    const me = players.find(p => p.id === state.playerId);
+    const myTeamIndex = me ? me.teamIndex : -1;
+
+    // Group other teams
+    const teams = {};
+    players.forEach(p => {
+      if (p.teamIndex === myTeamIndex) return; // Skip my team
+      if (!teams[p.teamIndex]) teams[p.teamIndex] = [];
+      teams[p.teamIndex].push(p);
+    });
+
+    const opponentTeamIndices = Object.keys(teams).sort();
 
     let assignedSeats = [];
-    if (opponents.length === 1) assignedSeats = [seats[1]]; // top
-    else if (opponents.length === 2) assignedSeats = [seats[0], seats[2]]; // left, right
-    else if (opponents.length >= 3) assignedSeats = [seats[0], seats[1], seats[2]]; // left, top, right
+    if (opponentTeamIndices.length === 1) assignedSeats = [seats[1]]; // top
+    else if (opponentTeamIndices.length === 2) assignedSeats = [seats[0], seats[2]]; // left, right
+    else if (opponentTeamIndices.length >= 3) assignedSeats = [seats[0], seats[1], seats[2]]; // left, top, right
 
-    opponents.forEach((p, i) => {
+    opponentTeamIndices.forEach((tIdx, i) => {
       const seat = assignedSeats[i];
       if (!seat) return;
 
+      const teamPlayers = teams[tIdx];
+      const p = teamPlayers[0]; // Representative for status (eliminated/shots)
+      
+      const names = teamPlayers.map(tp => tp.name).join(' & ');
+      const isEliminated = teamPlayers.every(tp => tp.isEliminated);
+      const isDisconnected = teamPlayers.every(tp => !tp.isConnected);
+
       const card = document.createElement('div');
       card.className = 'opponent-card';
-      if (p.isEliminated) card.classList.add('eliminated');
-      if (!p.isConnected) card.classList.add('disconnected');
-      if (p.id === currentTurnId) card.classList.add('active-turn');
-      card.id = `opponent-${p.id}`;
+      if (isEliminated) card.classList.add('eliminated');
+      if (isDisconnected) card.classList.add('disconnected');
+      if (parseInt(tIdx) === currentTurnTeamIndex) card.classList.add('active-turn');
+      
+      // If any teammate is targetable, the whole slot is targetable
+      const isTargetable = (state.targetingMode || state.chaosTargetingMode) && !isEliminated;
+      if (isTargetable) card.classList.add('targetable');
+      
+      card.id = `opponent-team-${tIdx}`;
 
-      // Mini card backs
+      // Mini card backs (from the shared team hand)
       let cardsHtml = '';
-      const count = Math.min(p.handSize, 10);
+      const handSize = p.handSize;
+      const count = Math.min(handSize, 10);
       for (let c = 0; c < count; c++) {
         cardsHtml += '<div class="mini-card-back"></div>';
       }
 
       card.innerHTML = `
-        <div class="opponent-name">${p.name}${!p.isConnected ? ' ⚡' : ''}${p.isEliminated ? ' 💀' : ''}</div>
+        <div class="opponent-name">${names}${isDisconnected ? ' ⚡' : ''}${isEliminated ? ' 💀' : ''}</div>
         <div class="opponent-cards-row">${cardsHtml}</div>
-        <div style="font-size:.75rem;color:var(--text-dim);margin:4px 0">${p.handSize} cards</div>
+        <div style="font-size:.75rem;color:var(--text-dim);margin:4px 0">${handSize} cards</div>
         <div class="opponent-shots" style="font-size: .8rem; font-weight: bold; color: var(--gold);">Shots: ${p.shotsTaken} / 6</div>
       `;
+
+      card.addEventListener('click', () => {
+        if (isTargetable) {
+          // In team mode, targeting an opponent team hits a specific member (the first non-eliminated one)
+          const target = teamPlayers.find(tp => !tp.isEliminated);
+          if (target) {
+            socket.emit('select_target', { roomCode: state.roomCode, targetId: target.id });
+            state.targetingMode = false;
+            state.chaosTargetingMode = false;
+            targetingBanner.classList.add('hidden');
+            renderOpponents(state.players, null);
+            showToast(`Targeting team: ${names}`, 'info');
+          }
+        }
+      });
 
       seat.appendChild(card);
     });
@@ -541,7 +615,8 @@
 
       const name = document.createElement('div');
       name.className = 'ranking-name';
-      name.textContent = r.name + (r.id === state.playerId ? ' (You)' : '');
+      const isMyTeam = r.memberIds && r.memberIds.includes(state.playerId);
+      name.textContent = r.names + (isMyTeam ? ' (Your Team)' : '');
 
       const status = document.createElement('div');
       status.className = 'ranking-status';
@@ -573,6 +648,7 @@
     state.roomCode = data.roomCode;
     state.settings = data.settings || state.settings;
     if (toggleDevilMode) toggleDevilMode.checked = state.settings.isDevilCardMode;
+    if (toggleChaosMode) toggleChaosMode.checked = state.settings.isChaosMode;
     showRoomLobby(data.roomCode, data.players, data.hostId);
     showToast('Room created!', 'success');
   });
@@ -582,6 +658,7 @@
     state.roomCode = data.roomCode;
     state.settings = data.settings || state.settings;
     if (toggleDevilMode) toggleDevilMode.checked = state.settings.isDevilCardMode;
+    if (toggleChaosMode) toggleChaosMode.checked = state.settings.isChaosMode;
     showRoomLobby(data.roomCode, data.players, data.hostId);
     showToast('Joined room!', 'success');
   });
@@ -589,7 +666,13 @@
   socket.on('settings_updated', (data) => {
     state.settings = data.settings;
     if (toggleDevilMode) toggleDevilMode.checked = state.settings.isDevilCardMode;
-    showToast(`Devil Mode: ${state.settings.isDevilCardMode ? 'ON' : 'OFF'}`, 'info');
+    if (toggleChaosMode) toggleChaosMode.checked = state.settings.isChaosMode;
+
+    let modeMsg = [];
+    if (state.settings.isDevilCardMode) modeMsg.push('Devil Mode: ON');
+    if (state.settings.isChaosMode) modeMsg.push('Chaos Mode: ON');
+    if (modeMsg.length === 0) modeMsg.push('Special Modes: OFF');
+    showToast(modeMsg.join(' | '), 'info');
   });
 
   socket.on('player_list_update', (data) => {
@@ -625,6 +708,10 @@
     state.currentRank = data.currentRank || null;
     gameRound.textContent = data.roundNumber;
 
+    // Failsafe hide overlays
+    revealOverlay.classList.add('hidden');
+    revolverOverlay.classList.add('hidden');
+
     renderHand();
     renderOpponents(data.players, data.firstPlayerId);
     const me = data.players.find(p => p.id === state.playerId);
@@ -641,7 +728,8 @@
 
   // -- Turns --
   socket.on('turn_start', (data) => {
-    state.isMyTurn = (data.playerId === state.playerId);
+    const me = state.players.find(p => p.id === state.playerId);
+    state.isMyTurn = (me && me.teamIndex === data.teamIndex);
     state.canCallLiar = data.canCallLiar && state.isMyTurn;
     state.currentRank = data.currentRank;
     state.isFirstPlay = data.isFirstPlay;
@@ -653,7 +741,7 @@
       statusMessage.textContent = state.canCallLiar ? 'Your turn — Play or call LIAR!' : 'Your turn — Play cards!';
     } else {
       statusMessage.className = 'status-message status-waiting';
-      statusMessage.textContent = `${data.playerName}'s turn...`;
+      statusMessage.textContent = `${data.teamNames}'s turn...`;
     }
 
     if (data.currentRank) {
@@ -661,7 +749,7 @@
       currentRankText.textContent = data.currentRank + 's';
     }
 
-    highlightActivePlayer(data.playerId);
+    renderOpponents(state.players, data.teamIndex);
     updatePile(data.pileSize);
     renderHand();
     updateControls();
@@ -669,7 +757,11 @@
   });
 
   socket.on('cards_played', (data) => {
-    const who = data.playerId === state.playerId ? 'You' : data.playerName;
+    const teamPlayers = state.players.filter(p => p.teamIndex === data.teamIndex);
+    const isMyTeam = teamPlayers.some(p => p.id === state.playerId);
+    const teamNames = teamPlayers.map(p => p.name).join(' & ');
+    const who = isMyTeam ? 'Your Team' : teamNames;
+
     lastPlayInfo.textContent = `${who} played ${data.declaredCount} ${data.declaredRank}${data.declaredCount > 1 ? 's' : ''}`;
     updatePile(data.pileSize);
   });
@@ -682,7 +774,7 @@
 
   socket.on('players_update', (data) => {
     state.players = data.players;
-    renderOpponents(data.players, data.currentTurnId);
+    renderOpponents(data.players, data.currentTeamIndex);
     const me = data.players.find(p => p.id === state.playerId);
     renderPlayerLives(me);
   });
@@ -690,8 +782,18 @@
   // -- Challenge --
   socket.on('liar_called', (data) => {
     clearTimer();
-    const who = data.challengerId === state.playerId ? 'You' : data.challengerName;
-    const whom = data.challengedId === state.playerId ? 'you' : data.challengedName;
+    const isChallengerMe = data.challengerId === state.playerId;
+    const isChallengedMe = data.challengedId === state.playerId;
+
+    const challengerTeamPlayers = state.players.filter(p => p.teamIndex === data.challengerTeamIndex);
+    const challengedTeamPlayers = state.players.filter(p => p.teamIndex === data.challengedTeamIndex);
+
+    const challengerNames = challengerTeamPlayers.map(p => p.name).join(' & ');
+    const challengedNames = challengedTeamPlayers.map(p => p.name).join(' & ');
+
+    const who = isChallengerMe ? 'You' : challengerNames;
+    const whom = isChallengedMe ? 'your team' : challengedNames;
+
     showToast(`${who} called LIAR on ${whom}!`, 'warning');
     statusMessage.className = 'status-message';
     statusMessage.textContent = '🔍 Revealing cards...';
@@ -711,83 +813,67 @@
       const info = rankSymbols[card.rank] || { symbol: '?', icon: '' };
       const color = card.rank === 'Ace' ? 'var(--accent-ace)' :
         card.rank === 'King' ? 'var(--accent-king)' :
-          card.rank === 'Queen' ? 'var(--accent-queen)' : 'var(--accent-joker)';
+          card.rank === 'Queen' ? 'var(--accent-queen)' :
+            card.rank === 'Chaos' ? 'var(--crimson)' :
+              card.rank === 'Master' ? 'var(--gold)' : 'var(--accent-joker)';
       el.style.borderColor = color;
       el.style.color = color;
       el.innerHTML = `<span>${info.icon}</span><span style="font-size:.8rem">${card.rank}</span>`;
       revealCards.appendChild(el);
     });
 
+    const challengedTeamPlayers = state.players.filter(p => p.teamIndex === data.challengedTeamIndex);
+    const challengedTeamNames = challengedTeamPlayers.map(p => p.name).join(' & ');
+
     if (data.wasLying) {
       revealResult.className = 'reveal-result liar';
-      revealResult.textContent = `🤥 ${data.challengedName} was LYING!`;
+      revealResult.textContent = `🤥 ${challengedTeamNames} were LYING!`;
     } else {
       revealResult.className = 'reveal-result truth';
-      revealResult.textContent = `✅ ${data.challengedName} told the truth!`;
+      revealResult.textContent = `✅ ${challengedTeamNames} told the truth!`;
+
+      if (data.hasDevilCard) {
+        revealResult.innerHTML += `<br><span style="color:var(--crimson); font-weight:900; font-size:1.2rem; animation: pulse-liar 1s infinite;">😈 DEVIL CARD TRIGGERED! 😈</span>`;
+        playSound('devil_laugh');
+      }
     }
   });
 
   socket.on('challenge_result', (data) => {
-    const loserText = data.loserId === state.playerId ? 'You pick' : `${data.loserName} picks`;
+    const isLoserMe = data.loserId === state.playerId;
+    const loserTeamPlayers = state.players.filter(p => p.teamIndex === data.teamIndex);
+    const loserTeamNames = loserTeamPlayers.map(p => p.name).join(' & ');
+
+    const loserText = isLoserMe ? 'Your team picks' : `${loserTeamNames} pick`;
     showToast(`${loserText} up the pile!`, 'info');
   });
 
+  socket.on('targeting_started', (data) => {
+    // Hide reveal overlay so players can see the board
+    revealOverlay.classList.add('hidden');
+
+    if (data.shooterId === state.playerId) {
+      if (data.isChaosMass) {
+        state.chaosTargetingMode = true;
+      } else {
+        state.targetingMode = true;
+      }
+      targetingBanner.classList.remove('hidden');
+      statusMessage.className = 'status-message status-your-turn';
+      statusMessage.textContent = '🔥 Your turn to SHOOT! Select a target!';
+      renderOpponents(state.players, null); // Add targetable class
+      showToast('Select a player to shoot!', 'warning');
+    } else {
+      statusMessage.className = 'status-message status-waiting';
+      statusMessage.textContent = `Waiting for ${data.shooterName} to pick a target...`;
+      showToast(`${data.shooterName} is choosing a target!`, 'warning');
+    }
+  });
+
+  // Old Devil Card screen removed to unify with reveal screen
   socket.on('devil_card_triggered', (data) => {
-    // Show dramatic full-screen reveal
-    const overlay = document.createElement('div');
-    overlay.className = 'devil-reveal-screen';
-
-    const devilCard = data.cards.find(c => c.isDevil) || data.cards[0];
-    const info = rankSymbols[devilCard.rank] || { symbol: '?', icon: '😈' };
-
-    overlay.innerHTML = `
-      <div class="devil-reveal-title">DEVIL CARD!</div>
-      <div class="devil-reveal-card-container">
-        <div class="devil-reveal-card">
-          <span>${info.icon}</span>
-        </div>
-      </div>
-      <div class="devil-reveal-subtitle">
-        ${data.placerName} told the truth!<br>
-        <span style="color:var(--gold);font-weight:900">EVERYONE ELSE TAKES A SHOT!</span>
-      </div>
-      <div class="devil-shootout-row" id="devil-shootout-row"></div>
-    `;
-
-    document.body.appendChild(overlay);
-    playSound('devil_laugh');
-
-    // After a delay, show the shots
-    setTimeout(() => {
-      const row = $('devil-shootout-row');
-      data.victims.forEach(v => {
-        const victimEl = document.createElement('div');
-        victimEl.className = 'devil-victim';
-        victimEl.innerHTML = `
-          <div class="victim-name">${v.name}</div>
-          <div class="victim-gun">🔫</div>
-        `;
-        row.appendChild(victimEl);
-
-        // Animate shot
-        setTimeout(() => {
-          if (v.fired) {
-            victimEl.querySelector('.victim-gun').textContent = '💥';
-            victimEl.classList.add('hit');
-            playSound('roulette_fire');
-          } else {
-            victimEl.querySelector('.victim-gun').textContent = '😮‍💨';
-            playSound('roulette_spin'); // Or a click sound
-          }
-        }, 1000 + Math.random() * 500);
-      });
-    }, 2000);
-
-    setTimeout(() => {
-      overlay.style.opacity = '0';
-      overlay.style.transition = 'opacity 1s ease';
-      setTimeout(() => overlay.remove(), 1000);
-    }, 6000);
+    // We now handle this via unified reveal and standard roulette sequence
+    console.log('Devil Card Triggered', data);
   });
 
   // -- Revolver --
@@ -799,7 +885,10 @@
     revolverEmoji.textContent = '🔫';
     revolverEmoji.className = 'revolver-emoji spinning';
 
-    revolverPlayer.textContent = `${data.playerName} pulls the trigger...`;
+    const teamPlayers = state.players.filter(p => p.teamIndex === data.teamIndex);
+    const teamNames = teamPlayers.length > 0 ? teamPlayers.map(p => p.name).join(' & ') : data.playerName;
+    
+    revolverPlayer.textContent = `${teamNames} are taking the shot...`;
     revolverResult.textContent = '';
 
     setTimeout(() => {
@@ -830,6 +919,8 @@
   // -- Round/Game Over --
   socket.on('round_over', (data) => {
     clearTimer();
+    revealOverlay.classList.add('hidden');
+    revolverOverlay.classList.add('hidden');
     const who = data.winnerId === state.playerId ? 'You' : data.winnerName;
     showToast(`${who} won the round!`, 'success');
     statusMessage.textContent = data.reason;
@@ -838,6 +929,7 @@
   socket.on('game_over', (data) => {
     clearTimer();
     state.gameActive = false;
+    playSound('game_over');
     setTimeout(() => showResults(data.rankings), 1500);
   });
 
@@ -917,6 +1009,10 @@
 
   socket.on('error', (data) => {
     showToast(data.message, 'error');
+  });
+
+  socket.on('sound_event', (data) => {
+    playSound(data.type);
   });
 
   socket.on('reconnect_success', (data) => {

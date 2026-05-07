@@ -1,13 +1,31 @@
-const { DECK_COMPOSITION } = require('./constants');
-
 /**
- * Creates a fresh 20-card deck.
+ * Creates a scaled deck based on the number of players.
  * Each card has a unique id and a rank.
  */
-function createDeck() {
+function createDeck(numPlayers = 4, isChaosMode = false) {
+  let composition;
+  if (isChaosMode) {
+    if (numPlayers === 2) {
+      composition = { King: 3, Queen: 3, Chaos: 1, Master: 1 };
+    } else if (numPlayers === 3) {
+      composition = { King: 4, Queen: 4, Chaos: 1, Master: 1 };
+    } else {
+      composition = { King: 5, Queen: 5, Chaos: 1, Master: 1 };
+    }
+  } else {
+    if (numPlayers === 2) {
+      composition = { Ace: 4, King: 4, Queen: 4, Joker: 1 };
+    } else if (numPlayers === 3) {
+      composition = { Ace: 5, King: 5, Queen: 5, Joker: 2 };
+    } else {
+      // Default 4 players
+      composition = { Ace: 6, King: 6, Queen: 6, Joker: 2 };
+    }
+  }
+
   const deck = [];
   let id = 0;
-  for (const [rank, count] of Object.entries(DECK_COMPOSITION)) {
+  for (const [rank, count] of Object.entries(composition)) {
     for (let i = 0; i < count; i++) {
       deck.push({ id: id++, rank });
     }
@@ -32,8 +50,8 @@ function shuffle(deck) {
  * Unused cards are set aside.
  * Returns { hands: Card[][], remainder: Card[] }
  */
-function deal(deck, numPlayers) {
-  const CARDS_PER_PLAYER = 5;
+function deal(deck, numPlayers, isChaosMode = false) {
+  const CARDS_PER_PLAYER = isChaosMode ? 3 : 5;
   const hands = [];
   let idx = 0;
 

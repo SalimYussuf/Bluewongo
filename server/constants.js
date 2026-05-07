@@ -1,19 +1,13 @@
 // === GAME CONFIGURATION ===
 const RANKS = ['Ace', 'King', 'Queen'];
 const JOKER = 'Joker';
+const CHAOS = 'Chaos';
+const MASTER = 'Master';
 
-const DECK_COMPOSITION = {
-  Ace: 6,
-  King: 6,
-  Queen: 6,
-  Joker: 2,
-};
-
-const TOTAL_CARDS = 20;
-const MAX_PLAYERS = 4;
+const MAX_PLAYERS = 8;
 const MIN_PLAYERS = 2;
 const MAX_CARDS_PER_PLAY = 3;
-const TURN_TIMEOUT_MS = 60000; // 60 seconds
+const TURN_TIMEOUT_MS = 90000; // 90 seconds
 const RECONNECT_TIMEOUT_MS = 60000; // 60 seconds
 const ROOM_CODE_LENGTH = 6;
 
@@ -27,6 +21,8 @@ const GAME_STATE = {
   DEALING: 'dealing',
   PLAYING: 'playing',
   CHALLENGE_REVEAL: 'challenge_reveal',
+  TARGETING: 'targeting',
+  CHAOS_TARGETING: 'chaos_targeting',
   REVOLVER: 'revolver',
   ROUND_OVER: 'round_over',
   GAME_OVER: 'game_over',
@@ -42,13 +38,14 @@ const ROOM_STATE = {
 // Game settings
 const DEFAULT_SETTINGS = {
   isDevilCardMode: false,
+  isChaosMode: false,
 };
 
 module.exports = {
   RANKS,
   JOKER,
-  DECK_COMPOSITION,
-  TOTAL_CARDS,
+  CHAOS,
+  MASTER,
   MAX_PLAYERS,
   MIN_PLAYERS,
   MAX_CARDS_PER_PLAY,

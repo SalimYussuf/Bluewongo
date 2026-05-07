@@ -37,6 +37,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+.hidden { display: none !important; }
+
 /* ===== GLASS PANEL ===== */
 .glass {
   background: var(--bg-glass);
@@ -175,6 +177,24 @@ input[type="text"]::placeholder { color: var(--text-muted); }
 .badge-ready { background: rgba(16,185,129,.2); color: var(--emerald); }
 .badge-you { background: rgba(129,140,248,.2); color: var(--accent-ace); }
 
+.team-lobby-slot { 
+  background: rgba(255,255,255,.03); 
+  border: 1px solid var(--border-glass); 
+  border-radius: var(--radius-lg); 
+  margin-bottom: 16px; 
+  padding: 12px; 
+}
+.team-slot-header { 
+  font-size: .75rem; 
+  font-weight: 700; 
+  color: var(--gold); 
+  text-transform: uppercase; 
+  margin-bottom: 8px; 
+  border-bottom: 1px solid rgba(212,168,71,.2); 
+  padding-bottom: 4px; 
+  letter-spacing: 1px;
+}
+
 /* ===== GAME SCREEN ===== */
 #game-screen {
   padding: 0;
@@ -219,6 +239,8 @@ input[type="text"]::placeholder { color: var(--text-muted); }
   transition: var(--transition);
 }
 .opponent-card.active-turn { border-color: var(--emerald); box-shadow: 0 0 20px var(--emerald-glow); transform: translateY(-4px); }
+.opponent-card.targetable { border-color: var(--gold); box-shadow: 0 0 20px rgba(212,168,71,.4); cursor: crosshair; animation: pulse-liar 2s infinite; }
+.opponent-card.targetable:hover { transform: scale(1.05) translateY(-4px); background: rgba(212,168,71,.1); }
 .opponent-card.eliminated { opacity: .4; filter: grayscale(100%); }
 .opponent-card.disconnected { opacity: .5; }
 .opponent-name { font-weight: 700; font-size: .9rem; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -350,11 +372,15 @@ input[type="text"]::placeholder { color: var(--text-muted); }
 .card[data-rank="King"] { color: var(--accent-king); border-color: rgba(245,158,11,.25); }
 .card[data-rank="Queen"] { color: var(--accent-queen); border-color: rgba(236,72,153,.25); }
 .card[data-rank="Joker"] { color: var(--accent-joker); border-color: rgba(168,85,247,.25); background: linear-gradient(135deg, var(--bg-card), rgba(168,85,247,.1)); }
+.card[data-rank="Chaos"] { color: var(--crimson); border-color: rgba(220,38,38,.4); background: linear-gradient(135deg, #2a0a0a, #4a0a0a); }
+.card[data-rank="Master"] { color: var(--gold); border-color: rgba(212,168,71,.4); background: linear-gradient(135deg, #2a220a, #4a3d0a); }
 
 .card[data-rank="Ace"].selected { border-color: var(--accent-ace); box-shadow: 0 0 20px rgba(129,140,248,.3); }
 .card[data-rank="King"].selected { border-color: var(--accent-king); box-shadow: 0 0 20px rgba(245,158,11,.3); }
 .card[data-rank="Queen"].selected { border-color: var(--accent-queen); box-shadow: 0 0 20px rgba(236,72,153,.3); }
 .card[data-rank="Joker"].selected { border-color: var(--accent-joker); box-shadow: 0 0 20px rgba(168,85,247,.3); }
+.card[data-rank="Chaos"].selected { border-color: var(--crimson); box-shadow: 0 0 20px rgba(220,38,38,.5); }
+.card[data-rank="Master"].selected { border-color: var(--gold); box-shadow: 0 0 20px rgba(212,168,71,.5); }
 
 /* ===== CONTROLS ===== */
 .controls-area {
@@ -618,6 +644,32 @@ input[type="text"]::placeholder { color: var(--text-muted); }
 @keyframes glow-pulse-red {
   0%, 100% { text-shadow: 0 0 5px rgba(220,38,38,0.5); }
   50% { text-shadow: 0 0 15px rgba(220,38,38,0.8), 0 0 25px rgba(220,38,38,0.4); }
+}
+
+@keyframes pulse-liar {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.1); opacity: 0.8; }
+}
+
+.targeting-banner {
+  background: linear-gradient(90deg, rgba(212,168,71,0) 0%, rgba(212,168,71,0.2) 50%, rgba(212,168,71,0) 100%);
+  border-top: 1px solid rgba(212,168,71,0.3);
+  border-bottom: 1px solid rgba(212,168,71,0.3);
+  padding: 8px;
+  text-align: center;
+  color: var(--gold);
+  font-weight: 800;
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  animation: glow-pulse-gold 2s infinite;
+  width: 100%;
+}
+.targeting-banner.hidden { display: none; }
+
+@keyframes glow-pulse-gold {
+  0%, 100% { text-shadow: 0 0 5px rgba(212,168,71,0.5); }
+  50% { text-shadow: 0 0 15px rgba(212,168,71,0.8), 0 0 25px rgba(212,168,71,0.4); }
 }
 
 .card.devil-card {

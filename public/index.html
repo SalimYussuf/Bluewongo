@@ -95,6 +95,14 @@
               <input type="checkbox" id="toggle-devil-mode">
               <span class="toggle-slider"></span>
             </label>
+            <label class="toggle-container" style="margin-top: 10px;">
+              <div class="toggle-info">
+                <span class="toggle-label">🔥 Chaos Mode</span>
+                <span class="toggle-desc">12 cards, 3 per hand, 1 play per turn. Winners pick targets!</span>
+              </div>
+              <input type="checkbox" id="toggle-chaos-mode">
+              <span class="toggle-slider"></span>
+            </label>
           </div>
         </div>
 
@@ -122,6 +130,11 @@
       <!-- Devil Mode Banner -->
       <div class="devil-mode-banner hidden" id="devil-banner">
         <span>😈 Devil Mode Active — Someone has the card...</span>
+      </div>
+
+      <!-- Targeting Banner -->
+      <div class="targeting-banner hidden" id="targeting-banner">
+        <span id="targeting-text">🔥 Select a player to shoot!</span>
       </div>
 
       <!-- Opponents Dashboard -->
