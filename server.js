@@ -11,9 +11,80 @@ const server = http.createServer(app);
 const io = new Server(server, {
   pingTimeout: 60000,
   pingInterval: 25000,
+  maxHttpBufferSize: 8 * 1024, // 8 KB — reject oversized messages
+  cors: {
+    origin: (origin, callback) => {
+      // Allow no-origin (same-origin requests), localhost dev, and the production domain
+      const allowed = [
+        undefined, // same-origin / server-side
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+      ];
+      // Also allow any Render deploy URL or custom domain — add yours here
+      const PRODUCTION_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://uwongo-bar.onrender.com';
+      if (PRODUCTION_ORIGIN) allowed.push(PRODUCTION_ORIGIN);
+
+      if (allowed.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.warn(`Blocked connection from origin: ${origin}`);
+        callback(new Error('Origin not allowed'));
+      }
+    },
+  },
 });
 
 app.use(express.static('public'));
+
+// ========== HELPERS ==========
+
+/** Strip HTML tags, trim, truncate — prevent XSS at the source */
+function sanitizeName(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  const clean = raw.replace(/<[^>]*>/g, '').trim().substring(0, 20);
+  return clean.length > 0 ? clean : null;
+}
+
+/** Sanitize chat message text */
+function sanitizeMessage(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  const clean = raw.replace(/<[^>]*>/g, '').trim().substring(0, 100);
+  return clean.length > 0 ? clean : null;
+}
+
+// ========== RATE LIMITER ==========
+const rateLimits = new Map(); // socketId -> { eventName -> [timestamps] }
+
+/**
+ * Returns true if the event should be BLOCKED for this socket.
+ * Allows `maxCount` events per `windowMs` milliseconds.
+ */
+function isRateLimited(socketId, eventName, maxCount = 3, windowMs = 5000) {
+  if (!rateLimits.has(socketId)) rateLimits.set(socketId, {});
+  const bucket = rateLimits.get(socketId);
+  const now = Date.now();
+
+  if (!bucket[eventName]) bucket[eventName] = [];
+  // Prune old timestamps
+  bucket[eventName] = bucket[eventName].filter(ts => ts > now - windowMs);
+
+  if (bucket[eventName].length >= maxCount) {
+    return true; // blocked
+  }
+  bucket[eventName].push(now);
+  return false;
+}
+
+/** Rate-limited events and their limits */
+const RATE_LIMITED_EVENTS = {
+  create_room:  { max: 2, window: 5000 },
+  join_room:    { max: 3, window: 5000 },
+  play_cards:   { max: 3, window: 5000 },
+  call_liar:    { max: 2, window: 5000 },
+  send_emoji:   { max: 3, window: 5000 },
+  lobby_chat:   { max: 3, window: 5000 },
+  kick_player:  { max: 2, window: 5000 },
+};
 
 // ========== STATE ==========
 const rooms = new Map(); // roomCode -> Room
@@ -25,14 +96,31 @@ const disconnectedPlayers = new Map(); // oldSocketId -> { roomCode, playerId, t
 io.on('connection', (socket) => {
   console.log(`Player connected: ${socket.id}`);
 
+  // Per-socket rate-limit check helper
+  function rateCheck(eventName) {
+    const cfg = RATE_LIMITED_EVENTS[eventName];
+    if (!cfg) return false;
+    if (isRateLimited(socket.id, eventName, cfg.max, cfg.window)) {
+      socket.emit('error', { message: 'Too many requests — slow down!' });
+      return true; // blocked
+    }
+    return false;
+  }
+
+  // Clean up rate-limit data when socket disconnects
+  socket.on('disconnect', () => {
+    rateLimits.delete(socket.id);
+  });
+
   // ---------- CREATE ROOM ----------
   socket.on('create_room', ({ playerName }) => {
-    if (!playerName || playerName.trim().length === 0) {
+    if (rateCheck('create_room')) return;
+    const name = sanitizeName(playerName);
+    if (!name) {
       socket.emit('error', { message: 'Name is required' });
       return;
     }
 
-    const name = playerName.trim().substring(0, 20);
     const player = new Player(socket.id, name);
     const code = Room.generateCode(rooms);
     const room = new Room(code, player);
@@ -55,7 +143,9 @@ io.on('connection', (socket) => {
 
   // ---------- JOIN ROOM ----------
   socket.on('join_room', ({ roomCode, playerName }) => {
-    if (!playerName || playerName.trim().length === 0) {
+    if (rateCheck('join_room')) return;
+    const name = sanitizeName(playerName);
+    if (!name) {
       socket.emit('error', { message: 'Name is required' });
       return;
     }
@@ -68,7 +158,15 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const name = playerName.trim().substring(0, 20);
+    // Duplicate name check (case-insensitive)
+    const nameLower = name.toLowerCase();
+    const hasDuplicate = [...room.players.values()].some(
+      p => p.name.toLowerCase() === nameLower && p.isConnected
+    );
+    if (hasDuplicate) {
+      socket.emit('error', { message: 'A player with that name is already in the room' });
+      return;
+    }
 
     // Check if this player is currently disconnected
     let foundDisconnected = null;
@@ -219,23 +317,25 @@ io.on('connection', (socket) => {
 
   // ---------- PLAY CARDS ----------
   socket.on('play_cards', ({ roomCode, cardIds, declaredRank, declaredCount }) => {
+    if (rateCheck('play_cards')) return;
     const engine = games.get(roomCode);
     if (!engine) return;
 
     const result = engine.playCards(socket.id, cardIds, declaredRank, declaredCount);
     if (!result.success) {
-      socket.emit('error', { message: result.error });
+      socket.emit('error', { message: 'Invalid action' });
     }
   });
 
   // ---------- CALL LIAR ----------
   socket.on('call_liar', ({ roomCode }) => {
+    if (rateCheck('call_liar')) return;
     const engine = games.get(roomCode);
     if (!engine) return;
 
     const result = engine.callLiar(socket.id);
     if (!result.success) {
-      socket.emit('error', { message: result.error });
+      socket.emit('error', { message: 'Invalid action' });
     }
   });
 
@@ -246,7 +346,7 @@ io.on('connection', (socket) => {
 
     const result = engine.selectTarget(socket.id, targetId);
     if (!result.success) {
-      socket.emit('error', { message: result.error });
+      socket.emit('error', { message: 'Invalid action' });
     }
   });
 
@@ -278,6 +378,7 @@ io.on('connection', (socket) => {
 
   // ---------- EMOJI ----------
   socket.on('send_emoji', ({ roomCode, emoji }) => {
+    if (rateCheck('send_emoji')) return;
     const room = rooms.get(roomCode);
     if (!room) return;
 
@@ -288,6 +389,53 @@ io.on('connection', (socket) => {
       playerId: socket.id,
       playerName: player.name,
       emoji,
+    });
+  });
+
+  // ---------- LOBBY CHAT ----------
+  socket.on('lobby_chat', ({ roomCode, message }) => {
+    if (rateCheck('lobby_chat')) return;
+    const room = rooms.get(roomCode);
+    if (!room) return;
+    const player = room.getPlayer(socket.id);
+    if (!player) return;
+    const text = sanitizeMessage(message);
+    if (!text) return;
+
+    io.to(roomCode).emit('lobby_chat_message', {
+      playerName: player.name,
+      message: text,
+      teamIndex: player.teamIndex,
+    });
+  });
+
+  // ---------- KICK PLAYER ----------
+  socket.on('kick_player', ({ roomCode, targetId }) => {
+    if (rateCheck('kick_player')) return;
+    const room = rooms.get(roomCode);
+    if (!room) return;
+    if (socket.id !== room.hostId) {
+      socket.emit('error', { message: 'Only the host can kick players' });
+      return;
+    }
+    if (room.state !== 'waiting') {
+      socket.emit('error', { message: 'Cannot kick during a game' });
+      return;
+    }
+    if (targetId === socket.id) return; // Can't kick yourself
+
+    const targetSocket = io.sockets.sockets.get(targetId);
+    if (targetSocket) {
+      targetSocket.emit('kicked', { message: 'You were kicked from the room' });
+      targetSocket.leave(roomCode);
+    }
+
+    room.removePlayer(targetId);
+    playerRooms.delete(targetId);
+
+    io.to(roomCode).emit('player_list_update', {
+      players: room.getPlayerList(),
+      hostId: room.hostId,
     });
   });
 

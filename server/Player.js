@@ -15,6 +15,15 @@ class Player {
     // Progressive Russian Roulette
     this.shotsTaken = 0;
     this.teamIndex = null;
+
+    // Per-game stats
+    this.stats = {
+      roundsSurvived: 0,
+      timesLied: 0,
+      caughtLiar: 0,
+      shotsTaken: 0,
+      timesTruthful: 0,
+    };
   }
 
 
@@ -44,6 +53,13 @@ class Player {
   resetRevolver() {
     this.shotsTaken = 0;
     this.isEliminated = false;
+    this.stats = {
+      roundsSurvived: 0,
+      timesLied: 0,
+      caughtLiar: 0,
+      shotsTaken: 0,
+      timesTruthful: 0,
+    };
   }
 
   removeCards(cardIds) {
@@ -72,6 +88,7 @@ class Player {
       maxShots: REVOLVER_CHAMBERS,
       disconnectedAt: this.disconnectedAt,
       teamIndex: this.teamIndex,
+      stats: this.stats,
     };
   }
 
@@ -90,6 +107,7 @@ class Player {
       shotsTaken: this.shotsTaken,
       disconnectedAt: this.disconnectedAt,
       teamIndex: this.teamIndex,
+      stats: this.stats,
     };
   }
 

@@ -108,6 +108,11 @@ class GameEngine {
       return;
     }
 
+    // Ensure currentTurnIndex is within bounds after filtering
+    if (this.currentTurnIndex >= this.turnOrder.length) {
+      this.currentTurnIndex = 0;
+    }
+
     // Auto-determine the rank for this round
     this.currentRank = RANKS[Math.floor(Math.random() * RANKS.length)];
 
@@ -150,6 +155,13 @@ class GameEngine {
 
     this.addLog(`Round ${this.roundNumber} — Cards dealt! Declare: ${this.currentRank}s`, 'system');
 
+    // Track roundsSurvived for alive players
+    for (const player of this.room.players.values()) {
+      if (!player.isEliminated) {
+        player.stats.roundsSurvived++;
+      }
+    }
+
     // Send to all players (active and eliminated/spectators)
     this.room.players.forEach((player, pid) => {
       const socket = this.io.sockets.sockets.get(player.socketId);
@@ -160,13 +172,17 @@ class GameEngine {
           roundNumber: this.roundNumber,
           firstTeamIndex: this.turnOrder[0],
           currentRank: this.currentRank,
+          turnOrder: this.turnOrder,
         });
       }
     });
+
+    // Emit round countdown then start turn
+    this.io.to(this.room.code).emit('round_countdown');
     this.state = GAME_STATE.PLAYING;
     setTimeout(() => {
       this.startTurn();
-    }, 1500);
+    }, 4000);
   }
 
   startTurn() {
@@ -232,29 +248,38 @@ class GameEngine {
   // ========== PLAYER ACTIONS ==========
 
   playCards(playerId, cardIds, declaredRank, declaredCount) {
+    // Input type validation — reject malformed payloads
+    if (!Array.isArray(cardIds) || typeof declaredRank !== 'string' || typeof declaredCount !== 'number') {
+      return { success: false, error: 'Invalid action' };
+    }
+    // Sanitise card IDs — must all be integers
+    if (!cardIds.every(id => Number.isInteger(id))) {
+      return { success: false, error: 'Invalid action' };
+    }
+
     if (this.state !== GAME_STATE.PLAYING) {
-      return { success: false, error: 'Not in playing state' };
+      return { success: false, error: 'Invalid action' };
     }
 
     const currentTeamIndex = this.turnOrder[this.currentTurnIndex];
     const player = this.room.getPlayer(playerId);
     if (!player || player.teamIndex !== currentTeamIndex) {
-      return { success: false, error: 'Not your team\'s turn' };
+      return { success: false, error: 'Invalid action' };
     }
 
     // Validate card count
     const maxPlay = this.room.settings.isChaosMode ? 1 : MAX_CARDS_PER_PLAY;
     if (cardIds.length < 1 || cardIds.length > maxPlay) {
-      return { success: false, error: `Must play 1${maxPlay > 1 ? '-' + maxPlay : ''} cards` };
+      return { success: false, error: 'Invalid action' };
     }
 
     if (cardIds.length > player.hand.length) {
-      return { success: false, error: 'Not enough cards in hand' };
+      return { success: false, error: 'Invalid action' };
     }
 
     // Validate declared count matches actual cards played
     if (declaredCount !== cardIds.length) {
-      return { success: false, error: 'Declared count must match cards played' };
+      return { success: false, error: 'Invalid action' };
     }
 
     // Validate all card IDs exist in player's hand
@@ -262,14 +287,14 @@ class GameEngine {
     for (const cardId of cardIds) {
       const card = player.hand.find(c => c.id === cardId);
       if (!card) {
-        return { success: false, error: 'Card not in your hand' };
+        return { success: false, error: 'Invalid action' };
       }
       actualCards.push(card);
     }
 
     // Validate declared rank — must match the auto-assigned round rank
     if (declaredRank !== this.currentRank) {
-      return { success: false, error: `Must declare ${this.currentRank}` };
+      return { success: false, error: 'Invalid action' };
     }
 
     this.clearTurnTimer();
@@ -335,17 +360,17 @@ class GameEngine {
 
   callLiar(challengerId) {
     if (this.state !== GAME_STATE.PLAYING) {
-      return { success: false, error: 'Not in playing state' };
+      return { success: false, error: 'Invalid action' };
     }
 
     if (!this.lastPlay) {
-      return { success: false, error: 'No previous play to challenge' };
+      return { success: false, error: 'Invalid action' };
     }
 
     const currentTeamIndex = this.turnOrder[this.currentTurnIndex];
     const challenger = this.room.getPlayer(challengerId);
     if (challenger.teamIndex !== currentTeamIndex) {
-      return { success: false, error: 'Not your team\'s turn to call liar' };
+      return { success: false, error: 'Invalid action' };
     }
 
     this.clearTurnTimer();
@@ -368,13 +393,17 @@ class GameEngine {
       challengedId: this.lastPlay.playerId,
       challengedName: challenged.name,
       challengedTeamIndex: challenged.teamIndex,
+      pileHistory: this.pileHistory.map(entry => ({
+        playerName: this.room.getPlayer(entry.playerId)?.name || 'Unknown',
+        cardCount: entry.cards.length,
+      })),
     });
     this.io.to(this.room.code).emit('sound_event', { type: 'liar_called' });
 
-    // Reveal after a delay (for animation)
+    // Reveal after a delay (extended for pile timeline readability)
     setTimeout(() => {
       this.resolveChallenge(challengerId);
-    }, 2000);
+    }, 3500);
 
     return { success: true };
   }
@@ -458,6 +487,16 @@ class GameEngine {
       hasDevilCard: isDevilTrigger
     });
 
+    // Track stats
+    challenger.stats.caughtLiar += wasLying ? 1 : 0;
+    if (wasLying) {
+      // Challenged player was lying
+      challenged.stats.timesLied++;
+    } else {
+      // Challenged player was truthful
+      challenged.stats.timesTruthful++;
+    }
+
     if (wasLying) {
       this.io.to(this.room.code).emit('sound_event', { type: 'liar_caught' });
     } else {
@@ -473,8 +512,9 @@ class GameEngine {
     const challengedTeamPlayers = [...this.room.players.values()].filter(p => p.teamIndex === challenged.teamIndex);
     const challengedTeamNames = challengedTeamPlayers.map(p => p.name).join(' & ');
 
+    const verb = challengedTeamPlayers.length > 1 ? 'were' : 'was';
     const reason = wasLying
-      ? `${challengedTeamNames} were caught lying!`
+      ? `${challengedTeamNames} ${verb} caught lying!`
       : `${challenger.name}'s team was wrong — ${challengedTeamNames} told the truth!`;
 
     this.addLog(reason, 'result');
@@ -606,16 +646,16 @@ class GameEngine {
 
   selectTarget(shooterId, targetId) {
     if (this.state !== GAME_STATE.TARGETING && this.state !== GAME_STATE.CHAOS_TARGETING) {
-      return { success: false, error: 'Not in targeting phase' };
+      return { success: false, error: 'Invalid action' };
     }
 
     if (shooterId !== this.currentShooterId) {
-      return { success: false, error: 'Not your turn to shoot' };
+      return { success: false, error: 'Invalid action' };
     }
 
     const target = this.room.getPlayer(targetId);
     if (!target || target.isEliminated) {
-      return { success: false, error: 'Invalid target' };
+      return { success: false, error: 'Invalid action' };
     }
 
     // Resolve the shot on the target
@@ -653,18 +693,22 @@ class GameEngine {
     }, 1200);
 
     if (fired) {
-      this.addLog(`💥 BANG! ${shooter.name} shot ${target.name}!`, 'elimination');
-      if (target.isEliminated) {
-        this.addLog(`💀 ${target.name} has been eliminated!`, 'elimination');
-      }
-      this.io.to(this.room.code).emit('player_eliminated', {
-        playerId: targetId,
-        playerName: target.name,
-        isEliminated: target.isEliminated,
-        shotsTaken: target.shotsTaken
-      });
+      setTimeout(() => {
+        this.addLog(`💥 BANG! ${shooter.name} shot ${target.name}!`, 'elimination');
+        if (target.isEliminated) {
+          this.addLog(`💀 ${target.name} has been eliminated!`, 'elimination');
+        }
+        this.io.to(this.room.code).emit('player_eliminated', {
+          playerId: targetId,
+          playerName: target.name,
+          isEliminated: target.isEliminated,
+          shotsTaken: target.shotsTaken
+        });
+      }, 1500);
     } else {
-      this.addLog(`😮‍💨 ${target.name} survived ${shooter.name}'s shot!`, 'survive');
+      setTimeout(() => {
+        this.addLog(`😮‍💨 ${target.name} survived ${shooter.name}'s shot!`, 'survive');
+      }, 1500);
     }
 
     // Determine what to do next
@@ -679,7 +723,7 @@ class GameEngine {
         } else {
           // In Chaos mode, start next round. Winner (shooter) usually goes first? Or next person.
           // Let's just make the shooter go first.
-          this.currentTurnIndex = this.turnOrder.indexOf(shooterId);
+          this.currentTurnIndex = this.turnOrder.indexOf(shooter.teamIndex);
           if (this.currentTurnIndex === -1) this.currentTurnIndex = 0;
           this.startRound();
         }
@@ -725,18 +769,22 @@ class GameEngine {
       const teamPlayers = [...this.room.players.values()].filter(p => p.teamIndex === loser.teamIndex);
       const teamNames = teamPlayers.map(p => p.name).join(' & ');
       
-      this.addLog(`💥 BANG! ${teamNames} got shot!`, 'elimination');
-      if (loser.isEliminated) {
-        this.addLog(`💀 ${teamNames} have been eliminated!`, 'elimination');
-      }
-      this.io.to(this.room.code).emit('player_eliminated', {
-        playerId: loserId,
-        playerName: loser.name,
-        isEliminated: loser.isEliminated,
-        shotsTaken: loser.shotsTaken
-      });
+      setTimeout(() => {
+        this.addLog(`💥 BANG! ${teamNames} got shot!`, 'elimination');
+        if (loser.isEliminated) {
+          this.addLog(`💀 ${teamNames} ${teamPlayers.length > 1 ? 'have' : 'has'} been eliminated!`, 'elimination');
+        }
+        this.io.to(this.room.code).emit('player_eliminated', {
+          playerId: loserId,
+          playerName: loser.name,
+          isEliminated: loser.isEliminated,
+          shotsTaken: loser.shotsTaken
+        });
+      }, 1500);
     } else {
-      this.addLog(`${loser.name} survived the shot!`, 'survive');
+      setTimeout(() => {
+        this.addLog(`${loser.name} survived the shot!`, 'survive');
+      }, 1500);
     }
 
     // Check if game should end
@@ -784,12 +832,28 @@ class GameEngine {
     const teamData = Array.from(teamIndices).map(tIdx => {
       const members = [...this.room.players.values()].filter(p => p.teamIndex === tIdx);
       const first = members[0];
+      // Aggregate stats across team members
+      const aggregatedStats = {
+        roundsSurvived: 0,
+        timesLied: 0,
+        caughtLiar: 0,
+        shotsTaken: 0,
+        timesTruthful: 0,
+      };
+      members.forEach(m => {
+        aggregatedStats.roundsSurvived = Math.max(aggregatedStats.roundsSurvived, m.stats.roundsSurvived);
+        aggregatedStats.timesLied += m.stats.timesLied;
+        aggregatedStats.caughtLiar += m.stats.caughtLiar;
+        aggregatedStats.shotsTaken = m.shotsTaken;
+        aggregatedStats.timesTruthful += m.stats.timesTruthful;
+      });
       return {
         teamIndex: tIdx,
         names: members.map(p => p.name).join(' & '),
         isEliminated: first.isEliminated,
         cardsLeft: first.hand.length,
-        memberIds: members.map(p => p.id)
+        memberIds: members.map(p => p.id),
+        stats: aggregatedStats,
       };
     });
 
@@ -828,7 +892,8 @@ class GameEngine {
       const randomCard = playerWithCards.hand[0];
       const rank = this.currentRank;
 
-      this.addLog(`⏰ ${playerWithCards.name}'s team ran out of time — auto-played 1 ${rank}`, 'timeout');
+      const teamSuffix = teamPlayers.length > 1 ? "'s team" : "";
+      this.addLog(`⏰ ${playerWithCards.name}${teamSuffix} ran out of time — auto-played 1 ${rank}`, 'timeout');
 
       this.io.to(this.room.code).emit('turn_timeout', {
         teamIndex,
@@ -880,6 +945,9 @@ class GameEngine {
     // Now actually eliminate the disconnected player
     player.isEliminated = true;
     player.isConnected = false;
+
+    const currentTeamIndex = this.turnOrder[this.currentTurnIndex];
+    const wasCurrentTurn = (player.teamIndex === currentTeamIndex);
 
     this.addLog(`${player.name} failed to reconnect — eliminated!`, 'elimination');
 
@@ -947,12 +1015,6 @@ class GameEngine {
       this.room.players.delete(oldPlayerId);
       player.id = newSocketId;
       this.room.players.set(newSocketId, player);
-
-      // Update turn order
-      const idx = this.turnOrder.indexOf(oldPlayerId);
-      if (idx !== -1) {
-        this.turnOrder[idx] = newSocketId;
-      }
 
       // Update host if needed
       if (this.room.hostId === oldPlayerId) {
