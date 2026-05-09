@@ -17,6 +17,7 @@
 
   <!-- REVEAL OVERLAY -->
   <div class="reveal-overlay hidden" id="reveal-overlay">
+    <div class="pile-timeline" id="pile-timeline"></div>
     <div class="reveal-title" id="reveal-title"></div>
     <div class="reveal-cards" id="reveal-cards"></div>
     <div class="reveal-result" id="reveal-result"></div>
@@ -36,6 +37,49 @@
     <div class="disconnect-message" id="disconnect-message">Waiting to reconnect...</div>
     <div class="disconnect-timer" id="disconnect-timer">60s</div>
     <button class="btn btn-emerald" id="btn-reconnect" style="display:none;">Reconnect Now</button>
+  </div>
+
+  <!-- COUNTDOWN OVERLAY -->
+  <div class="countdown-overlay hidden" id="countdown-overlay">
+    <div class="countdown-number" id="countdown-number">3</div>
+  </div>
+
+  <!-- HOW TO PLAY MODAL -->
+  <div class="modal-overlay hidden" id="help-modal">
+    <div class="modal-content glass">
+      <button class="modal-close" id="btn-close-help">✕</button>
+      <h2 class="modal-title">How to Play</h2>
+
+      <div class="modal-section">
+        <h3>🃏 The Deck</h3>
+        <p>20 cards — 6 Aces, 6 Kings, 6 Queens, 2 Jokers. Each player gets 5 cards. Jokers are wild and count as any rank.</p>
+      </div>
+
+      <div class="modal-section">
+        <h3>🔄 Each Round</h3>
+        <p>A rank is declared (Ace, King, or Queen). Everyone must claim to play that rank — but you can play any card face-down.</p>
+      </div>
+
+      <div class="modal-section">
+        <h3>🎴 On Your Turn</h3>
+        <p>Select 1–3 cards and play them face-down. You must declare you're playing the round's rank, even if you're bluffing.</p>
+      </div>
+
+      <div class="modal-section">
+        <h3>🤥 Calling LIAR</h3>
+        <p>Instead of playing, you can call LIAR on the previous player. Their cards are revealed. If they were lying, they lose. If they told the truth, YOU lose.</p>
+      </div>
+
+      <div class="modal-section">
+        <h3>🔫 Losing a Challenge</h3>
+        <p>The loser picks up the entire pile, then pulls the trigger on a Russian Roulette revolver. Progressive odds — 1/6, then 2/6, then 3/6... If it fires — eliminated! If not — survive and play on.</p>
+      </div>
+
+      <div class="modal-section">
+        <h3>🏆 Winning</h3>
+        <p>Last player (or team) standing wins! Survive the bluffs, survive the bullets.</p>
+      </div>
+    </div>
   </div>
 
   <!-- ===== LOBBY SCREEN ===== -->
@@ -68,6 +112,8 @@
             </div>
           </div>
         </div>
+
+        <button class="btn btn-outline btn-block btn-sm" id="btn-help-join" style="margin-top:8px">❓ How to Play</button>
       </div>
 
       <!-- Room Lobby (after joining) -->
@@ -75,12 +121,25 @@
         <div class="room-code-display glass">
           <div class="room-code-label">Room Code</div>
           <div class="room-code-value" id="display-room-code" title="Click to copy"></div>
-          <div class="room-code-hint">Click to copy • Share with friends</div>
+          <div class="room-code-hint" id="room-code-hint">Click to copy • Share with friends</div>
         </div>
 
         <div class="lobby-card glass">
-          <h2>Players</h2>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <h2>Players</h2>
+            <button class="btn-icon btn-sm" id="btn-help-room" title="How to Play" style="font-size:1rem;padding:4px 8px">❓</button>
+          </div>
           <ul class="player-list" id="player-list"></ul>
+        </div>
+
+        <!-- Lobby Chat -->
+        <div class="lobby-card glass" id="lobby-chat-panel">
+          <h2>Chat</h2>
+          <div class="lobby-chat-messages" id="lobby-chat-messages"></div>
+          <div class="input-row">
+            <input type="text" id="lobby-chat-input" placeholder="Type a message..." maxlength="100" autocomplete="off">
+            <button class="btn btn-emerald btn-sm" id="btn-send-chat">Send</button>
+          </div>
         </div>
 
         <!-- Room Settings (Host only) -->
@@ -117,12 +176,20 @@
 
   <!-- ===== GAME SCREEN ===== -->
   <div class="screen" id="game-screen">
-    <div class="game-layout">
+    <!-- Spectator Banner -->
+    <div class="spectator-banner hidden" id="spectator-banner">
+      💀 Spectating — You have been eliminated
+    </div>
+
+    <div class="game-layout" id="game-layout">
       <!-- Top bar -->
       <div class="game-top-bar glass">
         <div class="room-info">Room: <span id="game-room-code"></span></div>
         <div class="top-controls">
-          <button class="btn-icon" id="btn-mute" title="Mute/Unmute Sounds">🔊</button>
+          <div class="volume-control">
+            <button class="btn-icon" id="btn-mute" title="Mute/Unmute Sounds">🔊</button>
+            <input type="range" id="volume-slider" min="0" max="100" value="100" class="volume-slider">
+          </div>
         </div>
         <div class="round-info">Round <span id="game-round">1</span></div>
       </div>
@@ -181,7 +248,7 @@
           <button class="btn-liar" id="btn-call-liar" disabled>🃏 LIAR!</button>
         </div>
 
-        <div class="emoji-bar">
+        <div class="emoji-bar" id="emoji-bar">
           <button class="emoji-btn" data-emoji="😂">😂</button>
           <button class="emoji-btn" data-emoji="😱">😱</button>
           <button class="emoji-btn" data-emoji="🤥">🤥</button>
