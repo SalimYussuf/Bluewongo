@@ -21,7 +21,7 @@ const io = new Server(server, {
         'http://127.0.0.1:3000',
       ];
       // Also allow any Render deploy URL or custom domain — add yours here
-      const PRODUCTION_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://uwongo-bar.onrender.com';
+      const PRODUCTION_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://shenanigans-and-tomfoolery.onrender.com';
       if (PRODUCTION_ORIGIN) allowed.push(PRODUCTION_ORIGIN);
 
       if (allowed.includes(origin)) {
