@@ -64,25 +64,93 @@ screen.innerHTML = `
   </div>
 
 <style>
-  .scribble-canvas-wrap {
+  html,
+  body {
+    margin: 0;
+    padding: 0;
     width: 100%;
-    aspect-ratio: 16 / 9;
-    min-height: 320px;
-    max-width: 100%;
-    flex-shrink: 0;
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  #scribble-screen {
+    width: 100%;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  #scribble-layout {
+    display: flex;
+    gap: 20px;
+    padding: 20px;
+    width: 100%;
+    height: 100%;
+    max-width: 1900px;
+    margin: 0 auto;
+    box-sizing: border-box;
+    align-items: stretch;
+    overflow: hidden;
+  }
+
+  /* LEFT COLUMN */
+  #scribble-layout > div:first-child {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    min-width: 200px;
+    max-width: 250px;
+    overflow: hidden;
+  }
+
+  /* CENTER */
+  .scribble-center {
+    flex: 5 !important;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .scribble-canvas-wrap {
     position: relative;
+    flex: 1;
+    min-height: 0;
     overflow: hidden;
     background: white;
     border-radius: 12px;
+    touch-action: none;
+    overscroll-behavior: none;
   }
 
   #scribble-canvas {
-    display: block;
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
+    display: block;
     touch-action: none;
   }
 
+  /* RIGHT COLUMN */
+  #scribble-layout > div:last-child {
+    flex: 1;
+    min-width: 250px;
+    max-width: 350px;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  #scribble-chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+  }
+
+  /* TOOL BUTTONS */
   .color-btn {
     width: 30px;
     height: 30px;
@@ -101,6 +169,7 @@ screen.innerHTML = `
     transform: scale(1.1);
   }
 
+  /* CHAT */
   .scribble-msg {
     font-size: 0.9rem;
     word-break: break-word;
@@ -121,41 +190,33 @@ screen.innerHTML = `
     font-style: italic;
   }
 
-  /* Large Desktop Improvements */
-  @media (min-width: 1400px) {
+  /* MOBILE */
+  @media (max-width: 900px) {
+    html,
+    body {
+      overflow: hidden;
+    }
+
     #scribble-layout {
-      max-width: 1900px !important;
+      flex-direction: column;
+      gap: 12px;
+      padding: 10px;
+    }
+
+    #scribble-layout > div:first-child,
+    #scribble-layout > div:last-child {
+      min-width: 0;
+      max-width: 100%;
+      width: 100%;
     }
 
     .scribble-center {
-      flex: 5 !important;
+      flex: 1;
+      min-height: 45vh;
     }
 
     .scribble-canvas-wrap {
-      min-height: 700px;
-    }
-  }
-
-  /* Tablet + Mobile */
-  @media (max-width: 900px) {
-    .game-layout {
-      flex-direction: column !important;
-      padding: 10px !important;
-      gap: 12px !important;
-    }
-
-    .game-layout > div {
-      width: 100% !important;
-      max-width: 100% !important;
-      min-width: 0 !important;
-    }
-
-    .scribble-center {
-      order: 1;
-    }
-
-    #scribble-chat-messages {
-      max-height: 180px;
+      min-height: 260px;
     }
 
     #scribble-word-display {
@@ -167,12 +228,8 @@ screen.innerHTML = `
       font-size: 1.1rem !important;
     }
 
-    .scribble-canvas-wrap {
-      min-height: 220px;
-    }
-
-    #scribble-tools {
-      order: 2;
+    #scribble-chat-messages {
+      max-height: 160px;
     }
   }
 </style>
@@ -206,10 +263,25 @@ let lastY = 0;
 // Resize canvas properly
 function resizeCanvas() {
   const rect = canvas.parentElement.getBoundingClientRect();
-  canvas.width = rect.width;
-  canvas.height = rect.height;
-  
-  // Need to redraw strokes if we resize, but skipping for simplicity
+
+  const newWidth = Math.floor(rect.width);
+  const newHeight = Math.floor(rect.height);
+
+  if (canvas.width === newWidth && canvas.height === newHeight) {
+    return;
+  }
+
+  const imageData =
+    canvas.width > 0 && canvas.height > 0
+      ? ctx.getImageData(0, 0, canvas.width, canvas.height)
+      : null;
+
+  canvas.width = newWidth;
+  canvas.height = newHeight;
+
+  if (imageData) {
+    ctx.putImageData(imageData, 0, 0);
+  }
 }
 window.addEventListener('resize', resizeCanvas);
 // Call once shortly after mount to ensure layout is done
