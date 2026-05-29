@@ -77,7 +77,7 @@ display: block;
 touch-action: none;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 900px) {}
 
 .game-layout {
 flex-direction: column !important;
