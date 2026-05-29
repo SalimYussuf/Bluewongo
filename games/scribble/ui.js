@@ -64,6 +64,47 @@ screen.innerHTML = `
   </div>
 
   <style>
+  .scribble-canvas-wrap {
+width: 100%;
+aspect-ratio: 16 / 9;
+min-height: 260px;
+max-height: 75vh;
+flex-shrink: 0;
+}
+
+#scribble-canvas {
+display: block;
+touch-action: none;
+}
+
+@media (max-width: 900px) {
+
+.game-layout {
+flex-direction: column !important;
+padding: 10px !important;
+gap: 12px !important;
+}
+
+.game-layout > div {
+width: 100% !important;
+max-width: 100% !important;
+min-width: 0 !important;
+}
+
+#scribble-chat-messages {
+max-height: 180px;
+}
+
+#scribble-word-display {
+font-size: 1rem !important;
+letter-spacing: 1px !important;
+}
+
+#scribble-timer {
+font-size: 1.1rem !important;
+}
+
+
     .color-btn { width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; transition: transform 0.1s; }
     .color-btn:hover { transform: scale(1.1); }
     .color-btn.active { border-color: var(--emerald); transform: scale(1.1); }
