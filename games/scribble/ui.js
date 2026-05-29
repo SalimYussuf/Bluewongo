@@ -3,317 +3,78 @@ const state = window.app.state;
 
 const screen = document.getElementById('scribble-screen');
 
-// ========== NEW HTML STRUCTURE ==========
 screen.innerHTML = `
-<div class="game-layout" id="scribble-layout">
-  <!-- LEFT: Scores -->
-  <div class="left-column">
-    <div class="glass panel">
-      <h3>🏆 Scores</h3>
-      <ul id="scribble-scores"></ul>
+  <div class="game-layout" id="scribble-layout" style="display: flex; flex-direction: row; gap: 20px; padding: 20px; height: 100vh; max-width: 1600px; margin: 0 auto;">
+    <!-- Left Column: Scores & Tools -->
+    <div style="flex: 1; display: flex; flex-direction: column; gap: 20px; min-width: 200px; max-width: 250px;">
+      <div class="glass" style="padding: 15px; border-radius: 12px;">
+        <h3>Scores</h3>
+        <ul id="scribble-scores" style="list-style: none; padding: 0; margin-top: 10px;"></ul>
+      </div>
+      
+      <div class="glass" id="scribble-tools" style="padding: 15px; border-radius: 12px; display: none;">
+        <h3>Tools</h3>
+        <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
+          <button class="color-btn" style="background: white;" data-color="#ffffff"></button>
+          <button class="color-btn" style="background: #ef4444;" data-color="#ef4444"></button>
+          <button class="color-btn" style="background: #3b82f6;" data-color="#3b82f6"></button>
+          <button class="color-btn" style="background: #22c55e;" data-color="#22c55e"></button>
+          <button class="color-btn" style="background: #eab308;" data-color="#eab308"></button>
+          <button class="color-btn" style="background: #a855f7;" data-color="#a855f7"></button>
+          <button class="color-btn" style="background: #000000; border: 1px solid #333;" data-color="#000000"></button>
+        </div>
+        <div style="margin-top: 15px;">
+          <label>Brush Size: <span id="brush-size-label">5</span></label>
+          <input type="range" id="scribble-brush-size" min="2" max="30" value="5" style="width: 100%;">
+        </div>
+        <button class="btn btn-outline btn-block" id="scribble-clear-btn" style="margin-top: 15px;">Clear Canvas</button>
+      </div>
+    </div>
+
+    <!-- Center Column: Canvas -->
+    <div style="flex: 4; display: flex; flex-direction: column; gap: 10px; min-width: 500px;">
+      <div class="glass" style="display: flex; justify-content: space-between; padding: 15px; border-radius: 12px; align-items: center;">
+        <div id="scribble-round-info" style="font-weight: bold;">Round 1/3</div>
+        <div id="scribble-word-display" style="font-size: 1.5rem; letter-spacing: 3px; font-weight: bold; text-align: center; flex: 1;">WAITING...</div>
+        <div id="scribble-timer" style="font-size: 1.5rem; font-weight: bold; color: var(--emerald);">60</div>
+      </div>
+      
+      <div class="glass" style="flex: 1; border-radius: 12px; position: relative; overflow: hidden; background: white; cursor: url('data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'24\' viewBox=\'0 0 24 24\'><circle cx=\'12\' cy=\'12\' r=\'10\' fill=\'none\' stroke=\'black\' stroke-width=\'2\'/><circle cx=\'12\' cy=\'12\' r=\'1\' fill=\'red\'/></svg>') 12 12, crosshair;">
+        <canvas id="scribble-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></canvas>
+        <div id="scribble-overlay" style="position: absolute; inset: 0; background: rgba(0,0,0,0.8); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10;">
+          <h2 id="scribble-overlay-title" style="margin-bottom: 10px;">Waiting to start...</h2>
+          <p id="scribble-overlay-desc"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Column: Chat -->
+    <div class="glass" style="flex: 1; display: flex; flex-direction: column; min-width: 250px; max-width: 350px; border-radius: 12px;">
+      <div style="padding: 15px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+        <h3>Guesses</h3>
+      </div>
+      <div id="scribble-chat-messages" style="flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;"></div>
+      <div style="padding: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
+        <div class="input-row wrap-mobile">
+          <input type="text" id="scribble-chat-input" placeholder="Type guess here..." autocomplete="off">
+          <button class="btn btn-emerald btn-sm btn-no-shrink" id="scribble-chat-send">Send</button>
+        </div>
+      </div>
     </div>
   </div>
 
-  <!-- CENTER: Info bar, Canvas, Tools -->
-  <div class="center-column">
-    <div class="glass info-bar">
-      <div id="scribble-round-info">Round 1/3</div>
-      <div id="scribble-word-display">WAITING...</div>
-      <div id="scribble-timer">60</div>
-    </div>
-    <div class="canvas-container" id="canvas-container">
-      <canvas id="scribble-canvas"></canvas>
-      <div id="scribble-overlay" class="canvas-overlay">
-        <h2 id="scribble-overlay-title">Waiting to start…</h2>
-        <p id="scribble-overlay-desc">Get ready!</p>
-      </div>
-    </div>
-    <!-- Tools now live below the canvas, only visible for the drawer -->
-    <div class="glass tools-panel" id="scribble-tools" style="display:none;">
-      <h3>🎨 Tools</h3>
-      <div class="color-row">
-        <button class="color-btn active" style="background:#000000" data-color="#000000"></button>
-        <button class="color-btn" style="background:#ef4444" data-color="#ef4444"></button>
-        <button class="color-btn" style="background:#3b82f6" data-color="#3b82f6"></button>
-        <button class="color-btn" style="background:#22c55e" data-color="#22c55e"></button>
-        <button class="color-btn" style="background:#eab308" data-color="#eab308"></button>
-        <button class="color-btn" style="background:#a855f7" data-color="#a855f7"></button>
-        <button class="color-btn" style="background:#ffffff; border:1px solid #ddd;" data-color="#ffffff"></button>
-      </div>
-      <div class="brush-control">
-        <label>🖌️ Size: <span id="brush-size-label">5</span></label>
-        <input type="range" id="scribble-brush-size" min="2" max="30" value="5">
-      </div>
-      <button class="btn btn-outline btn-block" id="scribble-clear-btn">Clear Canvas</button>
-    </div>
-  </div>
-
-  <!-- RIGHT: Chat -->
-  <div class="right-column glass panel">
-    <h3>💬 Guesses</h3>
-    <div id="scribble-chat-messages"></div>
-    <div class="chat-input-row">
-      <input type="text" id="scribble-chat-input" placeholder="Type guess…" autocomplete="off">
-      <button class="btn btn-emerald btn-sm" id="scribble-chat-send">Send</button>
-    </div>
-  </div>
-</div>
+  <style>
+    .color-btn { width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; transition: transform 0.1s; }
+    .color-btn:hover { transform: scale(1.1); }
+    .color-btn.active { border-color: var(--emerald); transform: scale(1.1); }
+    .scribble-msg { font-size: 0.9rem; word-break: break-word; }
+    .scribble-msg .name { font-weight: bold; margin-right: 5px; }
+    .scribble-msg.correct { color: var(--emerald); font-weight: bold; }
+    .scribble-msg.close { color: var(--gold); font-style: italic; }
+  </style>
 `;
 
-// ========== CSS (INJECTED) ==========
-const style = document.createElement('style');
-style.textContent = `
-  #scribble-screen {
-    position: fixed;
-    top: 0; left: 0;
-    width: 100vw; height: 100vh;
-    background: #1a1a2e;
-    color: #fff;
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    z-index: 9999;
-    overflow: hidden;                /* no scroll on desktop */
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .game-layout {
-    width: 100%;
-    height: 100%;
-    max-width: 1600px;
-    margin: 0 auto;
-    display: flex;
-    gap: 16px;
-    padding: 16px;
-    box-sizing: border-box;
-  }
-
-  /* Side columns */
-  .left-column, .right-column {
-    width: 280px;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    /* Height will be constrained by parent, so it fits */
-  }
-
-  .center-column {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    min-width: 0;
-    /* prevent overflow */
-    overflow: hidden;
-  }
-
-  .glass {
-    background: rgba(255,255,255,0.08);
-    backdrop-filter: blur(12px);
-    border-radius: 16px;
-    border: 1px solid rgba(255,255,255,0.1);
-  }
-
-  .panel {
-    padding: 18px;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    overflow: hidden;
-  }
-
-  h3 {
-    margin: 0 0 12px 0;
-    font-size: 1.2rem;
-    font-weight: 600;
-  }
-
-  /* Scores */
-  #scribble-scores {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    overflow-y: auto;
-    flex: 1;
-  }
-  #scribble-scores li {
-    display: flex;
-    justify-content: space-between;
-    padding: 8px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
-    font-size: 1rem;
-  }
-
-  /* Tools */
-  .tools-panel {
-    padding: 16px;
-    flex-shrink: 0;
-    margin-top: 0;
-  }
-  .color-row {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-bottom: 12px;
-  }
-  .color-btn {
-    width: 32px; height: 32px;
-    border-radius: 50%;
-    border: 2px solid transparent;
-    cursor: pointer;
-    transition: 0.15s;
-  }
-  .color-btn.active {
-    border-color: #facc15;
-    transform: scale(1.15);
-  }
-  .brush-control {
-    margin-bottom: 12px;
-  }
-  .brush-control input { width: 100%; }
-
-  /* Info bar */
-  .info-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px 20px;
-    font-weight: bold;
-    font-size: 1.1rem;
-    flex-shrink: 0;
-  }
-  #scribble-word-display {
-    font-size: 1.8rem;
-    letter-spacing: 4px;
-    flex: 1;
-    text-align: center;
-  }
-  #scribble-timer {
-    font-size: 1.6rem;
-    color: #34d399;
-  }
-
-  /* Canvas container (dynamic height) */
-  .canvas-container {
-    position: relative;
-    background: #fff;
-    border-radius: 16px;
-    overflow: hidden;
-    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
-    aspect-ratio: 16 / 9;
-    width: 100%;
-    flex-shrink: 0;
-    /* Height is calculated via JS to fit remaining space */
-  }
-
-  #scribble-canvas {
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%;
-    height: 100%;
-    touch-action: none;
-    cursor: crosshair;
-  }
-
-  .canvas-overlay {
-    position: absolute;
-    inset: 0;
-    background: rgba(0,0,0,0.8);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    z-index: 10;
-    text-align: center;
-    padding: 20px;
-  }
-
-  /* Chat panel */
-  #scribble-chat-messages {
-    flex: 1;
-    overflow-y: auto;
-    margin-bottom: 12px;
-    font-size: 0.95rem;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .chat-input-row {
-    display: flex;
-    gap: 8px;
-    margin-top: auto;
-  }
-  #scribble-chat-input {
-    flex: 1;
-    padding: 8px 12px;
-    border-radius: 8px;
-    border: none;
-    background: rgba(255,255,255,0.15);
-    color: white;
-    outline: none;
-  }
-  .btn {
-    padding: 8px 16px;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-  .btn-emerald { background: #34d399; color: #000; }
-  .btn-outline { background: transparent; border: 1px solid rgba(255,255,255,0.3); color: white; }
-  .btn-block { width: 100%; }
-
-  .scribble-msg { word-break: break-word; }
-  .scribble-msg .name { font-weight: bold; margin-right: 4px; }
-  .scribble-msg.correct { color: #34d399; font-weight: bold; }
-  .scribble-msg.close { color: #facc15; font-style: italic; }
-
-  /* ========== MOBILE (max-width: 900px) ========== */
-  @media (max-width: 900px) {
-    #scribble-screen {
-      overflow-y: auto;       /* allow scrolling on mobile */
-      display: block;
-    }
-    .game-layout {
-      flex-direction: column;
-      height: auto;
-      padding: 10px;
-      gap: 12px;
-    }
-    .left-column, .right-column {
-      width: 100%;
-      flex-shrink: 0;
-    }
-    .left-column { order: 3; }   /* scores last */
-    .center-column { order: 1; } /* canvas first */
-    .right-column { order: 2; max-height: 300px; }
-
-    .canvas-container {
-      aspect-ratio: 4/3;
-      /* Height will be set by JS or fallback to 55vh */
-      max-height: 55vh;
-      flex: none;
-    }
-    .info-bar { font-size: 1rem; }
-    #scribble-word-display { font-size: 1.3rem; letter-spacing: 2px; }
-    #scribble-timer { font-size: 1.2rem; }
-    .tools-panel { margin-top: 12px; }
-    .right-column .panel { height: auto; }
-  }
-
-  /* Large desktop – slightly larger side panels */
-  @media (min-width: 1400px) {
-    .left-column, .right-column { width: 320px; }
-    .info-bar { font-size: 1.2rem; }
-    #scribble-word-display { font-size: 2.2rem; }
-    #scribble-timer { font-size: 2rem; }
-    .scribble-msg { font-size: 1rem; }
-  }
-`;
-document.head.appendChild(style);
-
-// ========== DOM REFS ==========
+// DOM Refs
 const canvas = document.getElementById('scribble-canvas');
 const ctx = canvas.getContext('2d');
 const overlay = document.getElementById('scribble-overlay');
@@ -330,66 +91,27 @@ const toolsPanel = document.getElementById('scribble-tools');
 const clearBtn = document.getElementById('scribble-clear-btn');
 const brushSizeInput = document.getElementById('scribble-brush-size');
 const brushSizeLabel = document.getElementById('brush-size-label');
-const canvasContainer = document.getElementById('canvas-container');
 
 let isDrawing = false;
 let currentDrawerId = null;
 let drawColor = '#000000';
 let drawSize = 5;
-let lastX = 0, lastY = 0;
+let lastX = 0;
+let lastY = 0;
 
-// ========== DYNAMIC CANVAS SIZING (fits viewport) ==========
-function layoutCanvas() {
-  const isMobile = window.innerWidth <= 900;
-  // Reset to allow CSS default on mobile, we only need precise calc on desktop
-  if (isMobile) {
-    canvasContainer.style.height = '';   // let mobile CSS handle it
-    return;
-  }
-
-  const layout = document.getElementById('scribble-layout');
-  const infoBar = document.querySelector('.info-bar');
-  const tools = document.getElementById('scribble-tools');
-
-  // Total vertical space = layout height - gaps - info bar - tools (if visible)
-  let availableH = layout.clientHeight - 16 * 2; // padding top/bottom of layout
-  availableH -= 12; // gap between info bar and canvas
-  availableH -= 12; // gap between canvas and tools (if tools visible)
-  availableH -= infoBar.offsetHeight;
-
-  if (tools && tools.style.display === 'block') {
-    availableH -= tools.offsetHeight;
-  } else {
-    // If tools hidden, we still need to account for that gap? No, we don't add it.
-  }
-
-  // Keep the canvas at least 200px high
-  if (availableH < 200) availableH = 200;
-
-  canvasContainer.style.height = availableH + 'px';
-}
-
-// Call after any change that affects height (tools visibility, resize)
-function updateLayout() {
-  layoutCanvas();
-}
-window.addEventListener('resize', updateLayout);
-
-// ========== CANVAS (fixed resolution – no clear on resize) ==========
-function initCanvasSize() {
+// Resize canvas properly
+function resizeCanvas() {
   const rect = canvas.parentElement.getBoundingClientRect();
-  if (canvas.width === 0 || canvas.height === 0) {
-    canvas.width = rect.width;
-    canvas.height = rect.height;
-  }
+  canvas.width = rect.width;
+  canvas.height = rect.height;
+  
+  // Need to redraw strokes if we resize, but skipping for simplicity
 }
-initCanvasSize();
-setTimeout(initCanvasSize, 200);
+window.addEventListener('resize', resizeCanvas);
+// Call once shortly after mount to ensure layout is done
+setTimeout(resizeCanvas, 100);
 
-// Remove any old dangerous resize listener that was clearing canvas
-window.removeEventListener('resize', resizeCanvas);
-
-// ========== TOOLS ==========
+// Set up tools
 document.querySelectorAll('.color-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
@@ -397,6 +119,7 @@ document.querySelectorAll('.color-btn').forEach(btn => {
     drawColor = btn.dataset.color;
   });
 });
+document.querySelector('.color-btn[data-color="#000000"]').classList.add('active');
 
 brushSizeInput.addEventListener('input', (e) => {
   drawSize = parseInt(e.target.value);
@@ -413,16 +136,20 @@ function clearCanvasLocal() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
-// ========== DRAWING ==========
-function getCanvasCoords(e) {
+// Drawing Logic
+function getMousePos(e) {
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
-  let clientX = e.clientX, clientY = e.clientY;
+  
+  let clientX = e.clientX;
+  let clientY = e.clientY;
+  
   if (e.touches && e.touches.length > 0) {
     clientX = e.touches[0].clientX;
     clientY = e.touches[0].clientY;
   }
+  
   return {
     x: (clientX - rect.left) * scaleX,
     y: (clientY - rect.top) * scaleY
@@ -432,14 +159,18 @@ function getCanvasCoords(e) {
 function startDrawing(e) {
   if (currentDrawerId !== state.playerId) return;
   isDrawing = true;
-  const pos = getCanvasCoords(e);
-  lastX = pos.x; lastY = pos.y;
+  const pos = getMousePos(e);
+  lastX = pos.x;
+  lastY = pos.y;
 }
 
 function draw(e) {
   if (!isDrawing || currentDrawerId !== state.playerId) return;
-  e.preventDefault();
-  const pos = getCanvasCoords(e);
+  e.preventDefault(); // Prevent scrolling on touch
+  
+  const pos = getMousePos(e);
+  
+  // Normalize coordinates (0 to 1) for broadcasting
   const stroke = {
     x0: lastX / canvas.width,
     y0: lastY / canvas.height,
@@ -448,19 +179,25 @@ function draw(e) {
     color: drawColor,
     size: drawSize
   };
+  
   drawStrokeLocal(stroke);
-  socket.emit('draw_stroke', { roomCode: state.roomCode, stroke });
-  lastX = pos.x; lastY = pos.y;
+  socket.emit('draw_stroke', { roomCode: state.roomCode, stroke: stroke });
+  
+  lastX = pos.x;
+  lastY = pos.y;
 }
 
-function stopDrawing() { isDrawing = false; }
+function stopDrawing() {
+  isDrawing = false;
+}
 
 canvas.addEventListener('mousedown', startDrawing);
 canvas.addEventListener('mousemove', draw);
 canvas.addEventListener('mouseup', stopDrawing);
 canvas.addEventListener('mouseout', stopDrawing);
-canvas.addEventListener('touchstart', (e) => { e.preventDefault(); startDrawing(e); }, {passive: false});
-canvas.addEventListener('touchmove', (e) => { draw(e); }, {passive: false});
+
+canvas.addEventListener('touchstart', startDrawing, {passive: false});
+canvas.addEventListener('touchmove', draw, {passive: false});
 canvas.addEventListener('touchend', stopDrawing);
 
 function drawStrokeLocal(stroke) {
@@ -475,21 +212,24 @@ function drawStrokeLocal(stroke) {
   ctx.closePath();
 }
 
-// ========== CHAT ==========
+// Chat Logic
 function sendGuess() {
   const text = chatInput.value.trim();
   if (!text) return;
   if (currentDrawerId === state.playerId) {
-    addChatMessage('System', 'You cannot guess while drawing!', 'close');
+    addChatMessage("System", "You cannot guess while drawing!", "close");
     chatInput.value = '';
     return;
   }
+  
   socket.emit('submit_guess', { roomCode: state.roomCode, guess: text });
   chatInput.value = '';
 }
 
 chatSend.addEventListener('click', sendGuess);
-chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendGuess(); });
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') sendGuess();
+});
 
 function addChatMessage(name, msg, type = '') {
   const div = document.createElement('div');
@@ -503,32 +243,36 @@ function updateScores(scores) {
   scoresList.innerHTML = '';
   scores.sort((a, b) => b.score - a.score).forEach(s => {
     const li = document.createElement('li');
+    li.style.display = 'flex';
+    li.style.justifyContent = 'space-between';
+    li.style.padding = '5px 0';
+    li.style.borderBottom = '1px solid rgba(255,255,255,0.1)';
     li.innerHTML = `<span>${s.name} ${s.id === currentDrawerId ? '✏️' : ''}</span> <span>${s.score}</span>`;
     scoresList.appendChild(li);
   });
 }
 
-// ========== SOCKET EVENTS ==========
+// Socket Events
 socket.on('scribble_turn_start', (data) => {
-  initCanvasSize();
+  resizeCanvas();
   clearCanvasLocal();
   currentDrawerId = data.drawerId;
   roundInfo.textContent = `Round ${data.round}/${data.maxRounds}`;
   timerDisplay.textContent = data.timeLimit;
   updateScores(data.scores);
+  
   overlay.style.display = 'none';
   chatInput.disabled = (currentDrawerId === state.playerId);
-
+  
   if (currentDrawerId === state.playerId) {
     toolsPanel.style.display = 'block';
-    wordDisplay.textContent = 'WAITING FOR WORD…';
+    wordDisplay.textContent = "WAITING FOR WORD...";
   } else {
     toolsPanel.style.display = 'none';
     wordDisplay.textContent = Array(data.wordLength).fill('_').join(' ');
   }
-
-  updateLayout();              // recalc canvas height after tools appear/disappear
-  addChatMessage('System', `${data.drawerName} is drawing!`, 'close');
+  
+  addChatMessage("System", `${data.drawerName} is drawing!`, "close");
 });
 
 socket.on('scribble_your_turn', (data) => {
@@ -537,32 +281,48 @@ socket.on('scribble_your_turn', (data) => {
 
 socket.on('scribble_timer_sync', (data) => {
   timerDisplay.textContent = data.timeLeft;
-  timerDisplay.style.color = data.timeLeft <= 10 ? '#ef4444' : '#34d399';
+  if (data.timeLeft <= 10) {
+    timerDisplay.style.color = 'var(--crimson)';
+  } else {
+    timerDisplay.style.color = 'var(--emerald)';
+  }
 });
 
 socket.on('scribble_turn_over', (data) => {
   overlay.style.display = 'flex';
-  overlayTitle.textContent = data.allGuessed ? 'Everyone guessed it!' : "Time's up!";
-  overlayDesc.innerHTML = `The word was: <span style="color:#facc15; font-size:1.8rem;">${data.word}</span>`;
+  
+  if (data.allGuessed) {
+    overlayTitle.textContent = "Everyone guessed it!";
+  } else {
+    overlayTitle.textContent = "Time's up!";
+  }
+  
+  overlayDesc.innerHTML = `The word was: <span style="color: var(--gold); font-weight: bold; font-size: 1.5rem;">${data.word}</span>`;
   updateScores(data.scores);
 });
 
-socket.on('scribble_draw_stroke', (data) => drawStrokeLocal(data.stroke));
-socket.on('scribble_clear_canvas', () => clearCanvasLocal());
+socket.on('scribble_draw_stroke', (data) => {
+  drawStrokeLocal(data.stroke);
+});
+
+socket.on('scribble_clear_canvas', () => {
+  clearCanvasLocal();
+});
 
 socket.on('scribble_chat_message', (data) => {
   addChatMessage(data.playerName, data.message);
 });
 
 socket.on('scribble_close_guess', (data) => {
-  addChatMessage('System', `'${data.guess}' is very close!`, 'close');
+  addChatMessage("System", `'${data.guess}' is very close!`, "close");
 });
 
 socket.on('scribble_correct_guess', (data) => {
-  addChatMessage(data.playerName, 'guessed the word!', 'correct');
-  if (data.playerId === state.playerId) chatInput.disabled = true;
+  addChatMessage(data.playerName, "guessed the word!", "correct");
+  
+  if (data.playerId === state.playerId) {
+    chatInput.disabled = true; // Disable input after correct guess
+  }
 });
 
-socket.on('game_over', (data) => {
-  if (window.app.showResults) window.app.showResults(data.rankings);
-});
+// Since the server emits game_over with rankings, we just reuse the existing Results screen.
