@@ -4,8 +4,8 @@ const state = window.app.state;
 const screen = document.getElementById('scribble-screen');
 
 screen.innerHTML = `
-  <div class="game-layout" id="scribble-layout" style="display: flex; flex-direction: row; gap: 20px; padding: 20px; height: 100vh; max-width: 1600px; margin: 0 auto;">
-    <!-- Left Column: Scores & Tools -->
+<div class="game-layout" id="scribble-layout" style="display: flex; gap: 20px; padding: 20px; min-height: 100vh; max-width: 1600px; margin: 0 auto; align-items: flex-start;">   
+<!-- Left Column: Scores & Tools -->
     <div style="flex: 1; display: flex; flex-direction: column; gap: 20px; min-width: 200px; max-width: 250px;">
       <div class="glass" style="padding: 15px; border-radius: 12px;">
         <h3>Scores</h3>
@@ -32,16 +32,16 @@ screen.innerHTML = `
     </div>
 
     <!-- Center Column: Canvas -->
-    <div style="flex: 4; display: flex; flex-direction: column; gap: 10px; min-width: 500px;">
-      <div class="glass" style="display: flex; justify-content: space-between; padding: 15px; border-radius: 12px; align-items: center;">
+<div class="scribble-center" style="flex: 4; display: flex; flex-direction: column; gap: 10px; min-width: 0;">
+<div class="glass" style="display: flex; justify-content: space-between; padding: 15px; border-radius: 12px; align-items: center;">
         <div id="scribble-round-info" style="font-weight: bold;">Round 1/3</div>
         <div id="scribble-word-display" style="font-size: 1.5rem; letter-spacing: 3px; font-weight: bold; text-align: center; flex: 1;">WAITING...</div>
         <div id="scribble-timer" style="font-size: 1.5rem; font-weight: bold; color: var(--emerald);">60</div>
       </div>
       
-      <div class="glass" style="flex: 1; border-radius: 12px; position: relative; overflow: hidden; background: white; cursor: url('data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'24\' viewBox=\'0 0 24 24\'><circle cx=\'12\' cy=\'12\' r=\'10\' fill=\'none\' stroke=\'black\' stroke-width=\'2\'/><circle cx=\'12\' cy=\'12\' r=\'1\' fill=\'red\'/></svg>') 12 12, crosshair;">
-        <canvas id="scribble-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></canvas>
-        <div id="scribble-overlay" style="position: absolute; inset: 0; background: rgba(0,0,0,0.8); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10;">
+<div class="glass scribble-canvas-wrap" style="position: relative; overflow: hidden; background: white; border-radius: 12px; cursor: url('data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'24\' height=\'24\' viewBox=\'0 0 24 24\'><circle cx=\'12\' cy=\'12\' r=\'10\' fill=\'none\' stroke=\'black\' stroke-width=\'2\'/><circle cx=\'12\' cy=\'12\' r=\'1\' fill=\'red\'/></svg>') 12 12, crosshair;">        
+<canvas id="scribble-canvas" style="position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none;"></canvas>
+<div id="scribble-overlay" style="position: absolute; inset: 0; background: rgba(0,0,0,0.8); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10;">
           <h2 id="scribble-overlay-title" style="margin-bottom: 10px;">Waiting to start...</h2>
           <p id="scribble-overlay-desc"></p>
         </div>
