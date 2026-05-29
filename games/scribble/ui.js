@@ -5,13 +5,30 @@ const screen = document.getElementById('scribble-screen');
 
 screen.innerHTML = `
 <div class="game-layout" id="scribble-layout">
-  <!-- LEFT COLUMN: Scores + Tools -->
-  <div class="left-column">
+  <!-- LEFT: Scores (desktop only) -->
+  <div class="left-column" id="scores-panel">
     <div class="glass panel">
       <h3>🏆 Scores</h3>
       <ul id="scribble-scores"></ul>
     </div>
-    <div class="glass panel tools-panel" id="scribble-tools" style="display:none;">
+  </div>
+
+  <!-- CENTER: Info bar, Canvas, Tools -->
+  <div class="center-column">
+    <div class="glass info-bar">
+      <div id="scribble-round-info">Round 1/3</div>
+      <div id="scribble-word-display">WAITING...</div>
+      <div id="scribble-timer">60</div>
+    </div>
+    <div class="canvas-container" id="canvas-container">
+      <canvas id="scribble-canvas"></canvas>
+      <div id="scribble-overlay" class="canvas-overlay">
+        <h2 id="scribble-overlay-title">Waiting to start…</h2>
+        <p id="scribble-overlay-desc">Get ready!</p>
+      </div>
+    </div>
+    <!-- Tools move here, only visible for drawer -->
+    <div class="glass tools-panel" id="scribble-tools" style="display:none;">
       <h3>🎨 Tools</h3>
       <div class="color-row">
         <button class="color-btn active" style="background:#000000" data-color="#000000"></button>
@@ -30,24 +47,8 @@ screen.innerHTML = `
     </div>
   </div>
 
-  <!-- CENTER: Canvas -->
-  <div class="center-column">
-    <div class="glass info-bar">
-      <div id="scribble-round-info">Round 1/3</div>
-      <div id="scribble-word-display">WAITING...</div>
-      <div id="scribble-timer">60</div>
-    </div>
-    <div class="canvas-container" id="canvas-container">
-      <canvas id="scribble-canvas"></canvas>
-      <div id="scribble-overlay" class="canvas-overlay">
-        <h2 id="scribble-overlay-title">Waiting to start…</h2>
-        <p id="scribble-overlay-desc">Get ready!</p>
-      </div>
-    </div>
-  </div>
-
-  <!-- RIGHT COLUMN: Chat -->
-  <div class="right-column glass panel">
+  <!-- RIGHT: Chat (guesses) -->
+  <div class="right-column glass panel" id="chat-panel">
     <h3>💬 Guesses</h3>
     <div id="scribble-chat-messages"></div>
     <div class="chat-input-row">
@@ -61,12 +62,12 @@ screen.innerHTML = `
 /* ========== CSS ========== */
 const style = document.createElement('style');
 style.textContent = `
-  /* ----- RESET & FULLSCREEN OVERLAY ----- */
+  /* Full‑screen overlay */
   #scribble-screen {
     position: fixed;
     top: 0; left: 0;
     width: 100vw; height: 100vh;
-    background: #1a1a2e;   /* dark background */
+    background: #1a1a2e;
     color: #fff;
     font-family: 'Segoe UI', system-ui, sans-serif;
     z-index: 9999;
@@ -87,14 +88,23 @@ style.textContent = `
     box-sizing: border-box;
   }
 
-  /* Left & Right columns */
+  /* Columns */
   .left-column,
   .right-column {
     width: 280px;
     flex-shrink: 0;
+  }
+
+  .left-column {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+  }
+
+  .right-column {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
   }
 
   .center-column {
@@ -132,6 +142,7 @@ style.textContent = `
     padding: 0;
     margin: 0;
     overflow-y: auto;
+    flex: 1;
   }
   #scribble-scores li {
     display: flex;
@@ -142,6 +153,11 @@ style.textContent = `
   }
 
   /* Tools */
+  .tools-panel {
+    padding: 16px;
+    display: none;   /* default hidden, shown by JS */
+    flex-shrink: 0;
+  }
   .color-row {
     display: flex;
     gap: 10px;
@@ -174,6 +190,7 @@ style.textContent = `
     padding: 12px 20px;
     font-weight: bold;
     font-size: 1.1rem;
+    flex-shrink: 0;
   }
   #scribble-word-display {
     font-size: 1.8rem;
@@ -186,7 +203,7 @@ style.textContent = `
     color: #34d399;
   }
 
-  /* Canvas container */
+  /* Canvas */
   .canvas-container {
     flex: 1;
     position: relative;
@@ -194,9 +211,8 @@ style.textContent = `
     border-radius: 16px;
     overflow: hidden;
     box-shadow: 0 8px 30px rgba(0,0,0,0.5);
-    /* Fixed aspect ratio 4:3 or 16:9? 16:9 feels better */
     aspect-ratio: 16 / 9;
-    max-height: calc(100vh - 150px);
+    max-height: calc(100vh - 200px);
     width: 100%;
   }
   #scribble-canvas {
@@ -220,7 +236,7 @@ style.textContent = `
     padding: 20px;
   }
 
-  /* Chat messages */
+  /* Chat */
   #scribble-chat-messages {
     flex: 1;
     overflow-y: auto;
@@ -250,6 +266,7 @@ style.textContent = `
     border-radius: 8px;
     cursor: pointer;
     font-weight: 600;
+    white-space: nowrap;
   }
   .btn-emerald { background: #34d399; color: #000; }
   .btn-outline { background: transparent; border: 1px solid rgba(255,255,255,0.3); color: white; }
@@ -260,31 +277,40 @@ style.textContent = `
   .scribble-msg.correct { color: #34d399; font-weight: bold; }
   .scribble-msg.close { color: #facc15; font-style: italic; }
 
-  /* ========== MOBILE ========== */
+  /* ========== MOBILE (max-width: 900px) ========== */
   @media (max-width: 900px) {
+    #scribble-screen {
+      overflow-y: auto;               /* allow scroll on mobile */
+      display: block;
+    }
     .game-layout {
       flex-direction: column;
+      height: auto;
       padding: 10px;
-      gap: 10px;
-      overflow-y: auto;     /* allow scroll on mobile */
+      gap: 12px;
     }
     .left-column, .right-column {
       width: 100%;
-      flex-shrink: 1;
+      flex-shrink: 0;
     }
     .left-column {
-      order: 2;   /* tools after canvas */
+      order: 3;   /* scores last */
     }
     .center-column {
-      order: 1;
+      order: 1;   /* canvas first */
     }
     .right-column {
-      order: 3;
-      max-height: 250px;   /* limit chat height */
+      order: 2;   /* guesses second */
+      max-height: 300px;   /* limit chat height */
     }
     .canvas-container {
       aspect-ratio: 4/3;
-      max-height: 50vh;
+      max-height: 55vh;
+      flex: none;
+      height: auto;
+    }
+    .info-bar {
+      font-size: 1rem;
     }
     #scribble-word-display {
       font-size: 1.3rem;
@@ -293,9 +319,16 @@ style.textContent = `
     #scribble-timer {
       font-size: 1.2rem;
     }
+    /* Tools will appear below canvas if visible */
+    .tools-panel {
+      margin-top: 12px;
+    }
+    .right-column .panel {
+      height: auto;
+    }
   }
 
-  /* ========== LARGE DESKTOP ========== */
+  /* Large desktop */
   @media (min-width: 1400px) {
     .left-column, .right-column {
       width: 320px;
@@ -316,7 +349,7 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
-/* ========== DOM REFS ========== */
+/* ========== DOM REFS (unchanged) ========== */
 const canvas = document.getElementById('scribble-canvas');
 const ctx = canvas.getContext('2d');
 const overlay = document.getElementById('scribble-overlay');
@@ -340,17 +373,15 @@ let drawColor = '#000000';
 let drawSize = 5;
 let lastX = 0, lastY = 0;
 
-/* ========== CANVAS SETUP (fixed resolution, no clear) ========== */
+/* ========== CANVAS (fixed resolution, no clear) ========== */
 function initCanvasSize() {
   const container = canvas.parentElement;
   const rect = container.getBoundingClientRect();
-  // Set internal resolution to match CSS size once – never touch again
   if (canvas.width === 0 || canvas.height === 0) {
     canvas.width = rect.width;
     canvas.height = rect.height;
   }
 }
-// Call now, and after any potential layout shift
 initCanvasSize();
 setTimeout(initCanvasSize, 200);
 
@@ -378,10 +409,10 @@ function clearCanvasLocal() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
-/* ========== DRAWING LOGIC ========== */
+/* ========== DRAWING ========== */
 function getCanvasCoords(e) {
   const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;   // fixed canvas.width
+  const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
   let clientX = e.clientX, clientY = e.clientY;
   if (e.touches && e.touches.length > 0) {
@@ -473,9 +504,9 @@ function updateScores(scores) {
   });
 }
 
-/* ========== SOCKET EVENTS (unchanged) ========== */
+/* ========== SOCKET EVENTS ========== */
 socket.on('scribble_turn_start', (data) => {
-  initCanvasSize();          // ensure canvas is set (will only set once)
+  initCanvasSize();
   clearCanvasLocal();
   currentDrawerId = data.drawerId;
   roundInfo.textContent = `Round ${data.round}/${data.maxRounds}`;
@@ -484,7 +515,7 @@ socket.on('scribble_turn_start', (data) => {
   overlay.style.display = 'none';
   chatInput.disabled = (currentDrawerId === state.playerId);
   if (currentDrawerId === state.playerId) {
-    toolsPanel.style.display = 'flex';
+    toolsPanel.style.display = 'block';
     wordDisplay.textContent = 'WAITING FOR WORD…';
   } else {
     toolsPanel.style.display = 'none';
