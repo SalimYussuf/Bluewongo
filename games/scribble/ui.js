@@ -67,13 +67,19 @@ screen.innerHTML = `
   .scribble-canvas-wrap {
     width: 100%;
     aspect-ratio: 16 / 9;
-    min-height: 260px;
-    max-height: 75vh;
+    min-height: 320px;
+    max-width: 100%;
     flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+    background: white;
+    border-radius: 12px;
   }
 
   #scribble-canvas {
     display: block;
+    width: 100%;
+    height: 100%;
     touch-action: none;
   }
 
@@ -115,6 +121,22 @@ screen.innerHTML = `
     font-style: italic;
   }
 
+  /* Large Desktop Improvements */
+  @media (min-width: 1400px) {
+    #scribble-layout {
+      max-width: 1900px !important;
+    }
+
+    .scribble-center {
+      flex: 5 !important;
+    }
+
+    .scribble-canvas-wrap {
+      min-height: 700px;
+    }
+  }
+
+  /* Tablet + Mobile */
   @media (max-width: 900px) {
     .game-layout {
       flex-direction: column !important;
@@ -128,6 +150,10 @@ screen.innerHTML = `
       min-width: 0 !important;
     }
 
+    .scribble-center {
+      order: 1;
+    }
+
     #scribble-chat-messages {
       max-height: 180px;
     }
@@ -139,6 +165,14 @@ screen.innerHTML = `
 
     #scribble-timer {
       font-size: 1.1rem !important;
+    }
+
+    .scribble-canvas-wrap {
+      min-height: 220px;
+    }
+
+    #scribble-tools {
+      order: 2;
     }
   }
 </style>
